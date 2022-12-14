@@ -883,6 +883,19 @@ class Qcow2TestCase(_ImageTestCase, test.NoDBTestCase):
             mock_image.return_value, mock.sentinel.new_size,
             encryption=encryption)
 
+    @mock.patch('nova.virt.libvirt.utils.extract_snapshot')
+    def test_snapshot_extract_with_encryption(self, mock_extract):
+        image = self.image_class(self.INSTANCE, self.NAME)
+        src_encryption = {'format': 'luks', 'secret': mock.sentinel.secret}
+        dest_encryption = {
+            'format': 'luks', 'secret': mock.sentinel.dest_secret}
+        image.snapshot_extract(
+            mock.sentinel.target, 'qcow2', src_encryption=src_encryption,
+            dest_encryption=dest_encryption)
+        mock_extract.assert_called_once_with(
+            self.PATH, 'qcow2', mock.sentinel.target, 'qcow2',
+            src_encryption=src_encryption, dest_encryption=dest_encryption)
+
 
 class LvmTestCase(_ImageTestCase, test.NoDBTestCase):
     VG = 'FakeVG'

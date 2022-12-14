@@ -130,3 +130,7 @@ resizing_states = (RESIZE_PREP, RESIZE_MIGRATING, RESIZE_MIGRATED,
 
 # These states indicate a rebuild
 rebuild_states = (REBUILDING, REBUILD_BLOCK_DEVICE_MAPPING, REBUILD_SPAWNING)
+
+# These states indicate a shelve
+shelving_states = (SHELVING, SHELVING_IMAGE_PENDING_UPLOAD,
+                   SHELVING_IMAGE_UPLOADING)

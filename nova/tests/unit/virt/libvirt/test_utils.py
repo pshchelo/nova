@@ -362,6 +362,18 @@ class LibvirtUtilsTestCase(test.NoDBTestCase):
                                        dest_format='ploop',
                                        out_format='parallels')
 
+    @mock.patch('nova.virt.images.convert_image')
+    def test_extract_snapshot_ephemeral_encryption(self, mock_convert_image):
+        src_encryption = {'format': 'luks', 'secret': 'foo'}
+        dest_encryption = {'format': 'luks', 'secret': 'bar'}
+        libvirt_utils.extract_snapshot(
+            '/path/to/disk/image', 'qcow2', '/extracted/snap', 'qcow2',
+            src_encryption=src_encryption, dest_encryption=dest_encryption)
+        mock_convert_image.assert_called_once_with(
+            '/path/to/disk/image', '/extracted/snap', 'qcow2', 'qcow2',
+            compress=False, src_encryption=src_encryption,
+            dest_encryption=dest_encryption, backing_file_format=None)
+
     def test_load_file(self):
         dst_fd, dst_path = tempfile.mkstemp()
         try:

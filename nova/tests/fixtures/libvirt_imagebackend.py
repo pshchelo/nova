@@ -82,6 +82,9 @@ class LibvirtImageBackendFixture(fixtures.Fixture):
         self.useFixture(fixtures.MonkeyPatch(
             'nova.virt.libvirt.imagebackend.Backend.backend',
             self._mock_backend))
+        self.useFixture(fixtures.MonkeyPatch(
+            'nova.virt.libvirt.imagebackend.Backend.by_libvirt_path',
+            self._mock_backend_by_libvirt_path))
 
     @property
     def created_disks(self):
@@ -215,6 +218,14 @@ class LibvirtImageBackendFixture(fixtures.Fixture):
             backend_self.BACKEND[CONF.libvirt.images_type].SUPPORTS_LUKS)
 
         return image_init
+
+    def _mock_backend_by_libvirt_path(
+        self, backend_self, instance, path, image_type=None,
+        disk_info_mapping=None
+    ):
+        fn = self._mock_backend(backend_self, image_type=image_type)
+        return fn(
+            instance=instance, path=path, disk_info_mapping=disk_info_mapping)
 
     def _fake_cache(
             self, fetch_func, filename, size=None, safe=False, *args,
