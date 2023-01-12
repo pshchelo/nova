@@ -2701,3 +2701,9 @@ class VTPMSecretNotFound(NovaException):
 
 class EphemeralEncryptionConflict(NovaException):
     msg_fmt = _('Conflict in %(action)s with ephemeral encryption: %(reason)s')
+
+
+class EphemeralEncryptionChangeForbidden(Forbidden):
+    msg_fmt = _(
+        'Only the user_id that owns the instance may change from '
+        'ephemeral encryption to no ephemeral encryption or vice versa.')

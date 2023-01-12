@@ -32882,6 +32882,7 @@ class EphemeralEncryptionTestCase(test.NoDBTestCase):
         self.drvr._host = mock.Mock()
 
         self.instance = objects.Instance(**_create_test_instance())
+        self.instance.flavor.extra_specs = {'hw:ephemeral_encryption': 'true'}
         # Avoid a lazy load on orphaned Instance object.
         self.instance.root_device_name = '/dev/vda'
 
@@ -33334,6 +33335,9 @@ class EphemeralEncryptionTestCase(test.NoDBTestCase):
             f'{self.instance.uuid}_{self.eph_bdm.uuid}: error')
         self.assertEqual(expected_msg, str(exp))
 
+    @mock.patch(
+        'nova.objects.BlockDeviceMappingList.get_by_instance_uuid',
+        new=mock.Mock(return_value=objects.BlockDeviceMappingList()))
     def test__cleanup_unused_secrets_delete_secret_fails(self):
         # Test exception handling when libvirt secret deletion fails during
         # cleanup.

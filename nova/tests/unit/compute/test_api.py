@@ -4119,7 +4119,8 @@ class _ComputeAPIUnitTestMixIn(object):
                     boot_index=None, image_id=None,
                     source_type='volume', destination_type='volume',
                     volume_type=None, snapshot_id=None,
-                    volume_id=uuids.volume_id, volume_size=None)])
+                    volume_id=uuids.volume_id, volume_size=None,
+                    encrypted=False)])
         mock_get_bdms.return_value = bdms
         get_flavor.return_value = test_flavor.fake_flavor
         flavor = instance.get_flavor()

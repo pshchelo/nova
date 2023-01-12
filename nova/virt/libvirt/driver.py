@@ -4971,9 +4971,64 @@ class LibvirtDriver(driver.ComputeDriver):
 
         return block_device_info
 
+    def _reset_ephemeral_encryption_driver_bdm_attrs(
+        self,
+        context: nova_context.RequestContext,
+        instance: 'objects.Instance',
+        image_meta: 'objects.ImageMeta',
+        block_device_info: ty.Dict[str, ty.Any],
+    ) -> ty.Optional[ty.Dict[str, ty.Any]]:
+        """Reset ephemeral encryption attributes in driver BDMs before use.
+
+        The use case here is a rebuild from an image that requested ephemeral
+        encryption to an image with no ephemeral encryption.
+        """
+        encryption_requested = hardware.get_ephemeral_encryption_constraint(
+            instance.flavor, image_meta)
+        encrypted_bdms = driver.block_device_info_get_encrypted_disks(
+            block_device_info)
+        if not encryption_requested and encrypted_bdms:
+            # Delete libvirt secrets.
+            self._cleanup_ephemeral_encryption_secrets(
+                context, instance, block_device_info)
+            # Delete key manager secrets.
+            exception_msgs = []
+            last_exception = Exception()
+            for driver_bdm in encrypted_bdms:
+                secret_uuid = driver_bdm['encryption_secret_uuid']
+                if secret_uuid:
+                    try:
+                        crypto.delete_encryption_secret(
+                            context, instance.uuid, secret_uuid)
+                    except Exception as e:
+                        msg = (
+                            f'Failed to delete encryption secret '
+                            f'{secret_uuid} in the key manager for driver BDM '
+                            f"{driver_bdm['uuid']}: " + str(e))
+                        LOG.exception(msg, instance=instance)
+                        exception_msgs.append(msg)
+                        last_exception = e
+
+                driver_bdm['encrypted'] = False
+                driver_bdm['encryption_format'] = None
+                driver_bdm['encryption_secret_uuid'] = None
+                driver_bdm.save()
+
+            if exception_msgs:
+                msg = '\n'.join(exception_msgs)
+                raise last_exception.__class__(msg)
+
+        return block_device_info
+
     def spawn(self, context, instance, image_meta, injected_files,
               admin_password, allocations, network_info=None,
               block_device_info=None, power_on=True, accel_info=None):
+
+        # NOTE(melwitt): If we are going from ephemeral encryption to no
+        # ephemeral encryption (example: rebuild), we need to reset the
+        # encryption attributes in the driver BDMs.
+        block_device_info = self._reset_ephemeral_encryption_driver_bdm_attrs(
+            context, instance, image_meta, block_device_info)
 
         # NOTE(lyarwood): Before we generate disk_info we need to ensure the
         # driver_bdms are populated with any missing encryption attributes such

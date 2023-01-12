@@ -228,13 +228,10 @@ class DriverSwapBlockDevice(DriverBlockDevice):
         'encryption_format',
         'encryption_details',
     ])
-    _readonly_fields = set(['encrypted'])
     _update_on_save = {
         'disk_bus': None,
         'device_name': None,
-        # We don't update the 'encrypted' attribute on save because we are not
-        # going to encrypt or decrypt an existing disk due to a change in the
-        # 'encrypted' attribute value.
+        'encrypted': False,
         'encryption_secret_uuid': None,
         'encryption_format': None,
         'encryption_details': None,
@@ -270,16 +267,13 @@ class DriverImageBlockDevice(DriverBlockDevice):
     _fields = set([
         'device_name',
         'size']) | _new_only_fields
-    _readonly_fields = set(['encrypted'])
     _legacy_fields = (
         _fields - _new_only_fields | set(['num', 'virtual_name']))
     _update_on_save = {
         'disk_bus': None,
         'device_name': None,
         'device_type': None,
-        # We don't update the 'encrypted' attribute on save because we are not
-        # going to encrypt or decrypt an existing disk due to a change in the
-        # 'encrypted' attribute value.
+        'encrypted': False,
         'encryption_secret_uuid': None,
         'encryption_format': None,
         'encryption_details': None,
@@ -315,14 +309,11 @@ class DriverEphemeralBlockDevice(DriverBlockDevice):
         'encryption_format',
         'encryption_details'])
     _fields = set(['device_name', 'size']) | _new_only_fields
-    _readonly_fields = set(['encrypted'])
     _update_on_save = {
         'disk_bus': None,
         'device_name': None,
         'device_type': None,
-        # We don't update the 'encrypted' attribute on save because we are not
-        # going to encrypt or decrypt an existing disk due to a change in the
-        # 'encrypted' attribute value.
+        'encrypted': False,
         'encryption_secret_uuid': None,
         'encryption_format': None,
         'encryption_details': None,
