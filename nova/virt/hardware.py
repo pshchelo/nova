@@ -3015,13 +3015,13 @@ def get_ephemeral_encryption_constraint(
         emsg = _(
             "Flavor %(flavor_name)s has hw:ephemeral_encryption extra spec "
             "explicitly set to %(flavor_val)s, conflicting with "
-            "image %(image_name)s which has hw_ephemeral_encryption property "
+            "image %(image_id)s which has hw_ephemeral_encryption property "
             "explicitly set to %(image_val)s"
         )
         data = {
             'flavor_name': flavor.name,
             'flavor_val': flavor_eph_encryption_str,
-            'image_name': image_meta.name,
+            'image_id': image_meta.id,
             'image_val': image_eph_encryption,
         }
         raise exception.FlavorImageConflict(emsg % data)

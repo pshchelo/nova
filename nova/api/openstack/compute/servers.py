@@ -86,6 +86,7 @@ INVALID_FLAVOR_IMAGE_EXCEPTIONS = (
     exception.RequiredMixedInstancePolicy,
     exception.RequiredMixedOrRealtimeCPUMask,
     exception.InvalidMixedInstanceDedicatedMask,
+    exception.EphemeralEncryptionConflict,
 )
 
 

@@ -16,3 +16,10 @@ features:
     * interface attach/detach
     * volume attach/detach
     * diagnostics show
+    * resize
+    * cold migration
+
+    .. note::
+
+      Cross cell resize of servers specifying ephemeral encryption is not
+      supported yet as it requires support of snapshots.

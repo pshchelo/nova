@@ -2697,3 +2697,7 @@ class VTPMOldCompute(Invalid):
 class VTPMSecretNotFound(NovaException):
     msg_fmt = _('TPM encryption secret for instance %(instance_uuid)s was not '
                 'found.')
+
+
+class EphemeralEncryptionConflict(NovaException):
+    msg_fmt = _('Conflict in %(action)s with ephemeral encryption: %(reason)s')

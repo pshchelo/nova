@@ -153,10 +153,12 @@ class Image(metaclass=abc.ABCMeta):
         pass
 
     @abc.abstractmethod
-    def resize_image(self, size):
+    def resize_image(self, size, encryption=None):
         """Resize image to size (in bytes).
 
         :size: Desired size of image in bytes
+        :encryption: Dict detailing various encryption attributes such as the
+                     format and passphrase.
 
         """
         pass
@@ -311,7 +313,9 @@ class Image(metaclass=abc.ABCMeta):
             # create_image() only creates the base image if needed, so
             # we cannot rely on it to exist here
             if os.path.exists(base) and size > self.get_disk_size(base):
-                self.resize_image(size)
+                context = kwargs.get('context')
+                encryption = self.get_encryption(context)
+                self.resize_image(size, encryption=encryption)
 
             if (self.preallocate and self._can_fallocate() and
                     os.access(self.path, os.W_OK)):
@@ -672,7 +676,7 @@ class Flat(Image):
 
         self.correct_format()
 
-    def resize_image(self, size):
+    def resize_image(self, size, encryption=None):
         image = imgmodel.LocalFileImage(self.path, self.driver_format)
         disk.extend(image, size)
 
@@ -776,7 +780,8 @@ class Qcow2(Image):
                     libvirt_utils.copy_image(base, legacy_base)
                     image = imgmodel.LocalFileImage(legacy_base,
                                                     imgmodel.FORMAT_QCOW2)
-                    disk.extend(image, legacy_backing_size)
+                    disk.extend(
+                        image, legacy_backing_size, encryption=bdm_encryption)
 
         if not os.path.exists(self.path):
             with fileutils.remove_path_on_error(self.path):
@@ -784,9 +789,9 @@ class Qcow2(Image):
                     base, self.path, size, safe=safe,
                     encryption=bdm_encryption)
 
-    def resize_image(self, size):
+    def resize_image(self, size, encryption=None):
         image = imgmodel.LocalFileImage(self.path, imgmodel.FORMAT_QCOW2)
-        disk.extend(image, size)
+        disk.extend(image, size, encryption=encryption)
 
     def snapshot_extract(self, target, out_format):
         libvirt_utils.extract_snapshot(self.path, 'qcow2',
@@ -924,7 +929,7 @@ class Lvm(Image):
 
     # NOTE(nic): Resizing the image is already handled in create_image(),
     # and migrate/resize is not supported with LVM yet, so this is a no-op
-    def resize_image(self, size):
+    def resize_image(self, size, encryption=None):
         pass
 
     @contextlib.contextmanager
@@ -1072,7 +1077,7 @@ class Rbd(Image):
         if size and size > self.get_disk_size(self.rbd_name):
             self.driver.resize(self.rbd_name, size)
 
-    def resize_image(self, size):
+    def resize_image(self, size, encryption=None):
         self.driver.resize(self.rbd_name, size)
 
     def snapshot_extract(self, target, out_format):
@@ -1395,7 +1400,7 @@ class Ploop(Image):
             with fileutils.remove_path_on_error(self.path, remove=remove_func):
                 _copy_ploop_image(base, self.path, size)
 
-    def resize_image(self, size):
+    def resize_image(self, size, encryption=None):
         image = imgmodel.LocalFileImage(self.path, imgmodel.FORMAT_PLOOP)
         disk.extend(image, size)
 

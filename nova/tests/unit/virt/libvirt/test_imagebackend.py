@@ -266,6 +266,38 @@ class _ImageTestCase(object):
         self.assertEqual(uuids.secret, disk.ephemeral_encryption.secret.uuid)
         self.assertEqual("luks", disk.ephemeral_encryption.format)
 
+    @mock.patch('nova.crypto.get_encryption_secret',
+                return_value=mock.sentinel.secret)
+    def test_cache_resize_with_encryption(self, mock_get_secret):
+        encryption_details = objects.EncryptDetails()
+        disk_info = {
+            'bus': 'virtio',
+            'dev': '/dev/vda',
+            'type': 'disk',
+            'encrypted': True,
+            'encryption_format': 'luks',
+            'encryption_secret_uuid': uuids.secret,
+            'encryption_details': encryption_details,
+        }
+        image = self.image_class(
+            self.INSTANCE, self.NAME, disk_info_mapping=disk_info)
+        image.preallocate = False
+        image.get_disk_size = mock.Mock(return_value=1024)
+
+        # base dir exists, image exists, template exists, template exists
+        fn = mock.MagicMock()
+        with mock.patch.object(os.path, 'exists', return_value=True):
+            with mock.patch.object(image, 'resize_image') as mock_resize_image:
+                image.cache(fn, self.TEMPLATE, size=2048, context=self.CONTEXT)
+
+        mock_get_secret.assert_called_once_with(self.CONTEXT, uuids.secret)
+        encryption = {
+            'format': 'luks',
+            'secret': mock.sentinel.secret,
+            'details': encryption_details,
+        }
+        mock_resize_image.assert_called_once_with(2048, encryption=encryption)
+
 
 class FlatTestCase(_ImageTestCase, test.NoDBTestCase):
 
@@ -685,11 +717,12 @@ class Qcow2TestCase(_ImageTestCase, test.NoDBTestCase):
     @mock.patch.object(imagebackend.Image, 'verify_base_size')
     @mock.patch('nova.virt.libvirt.utils.copy_image')
     @mock.patch('nova.privsep.path.utime')
-    def test_generate_resized_backing_files(self, mock_utime, mock_copy,
-                                            mock_verify, mock_exist,
-                                            mock_extend, mock_get,
-                                            mock_create, mock_sync,
-                                            mock_detect_format):
+    def _test_generate_resized_backing_files(self, mock_utime, mock_copy,
+                                             mock_verify, mock_exist,
+                                             mock_extend, mock_get,
+                                             mock_create, mock_sync,
+                                             mock_detect_format,
+                                             disk_info_mapping=None):
         mock_sync.side_effect = lambda *a, **kw: self._fake_deco
         mock_get.return_value = self.QCOW2_BASE
         fn = mock.MagicMock()
@@ -700,7 +733,8 @@ class Qcow2TestCase(_ImageTestCase, test.NoDBTestCase):
                        mock.call(self.PATH),
                        mock.call(self.QCOW2_BASE),
                        mock.call(self.PATH)]
-        image = self.image_class(self.INSTANCE, self.NAME)
+        image = self.image_class(self.INSTANCE, self.NAME,
+            disk_info_mapping=disk_info_mapping)
 
         image.create_image(
             fn, self.TEMPLATE_PATH, self.SIZE, context=self.CONTEXT)
@@ -709,9 +743,17 @@ class Qcow2TestCase(_ImageTestCase, test.NoDBTestCase):
         mock_verify.assert_called_once_with(self.TEMPLATE_PATH, self.SIZE)
         mock_copy.assert_called_once_with(self.TEMPLATE_PATH,
                                           self.QCOW2_BASE)
+        encryption = None
+        if disk_info_mapping:
+            encryption = {
+                'format': disk_info_mapping.get('encryption_format'),
+                'secret': mock.sentinel.secret,
+                'details': disk_info_mapping.get('encryption_details'),
+            }
         mock_extend.assert_called_once_with(
             imgmodel.LocalFileImage(self.QCOW2_BASE,
-                                    imgmodel.FORMAT_QCOW2), self.SIZE)
+                                    imgmodel.FORMAT_QCOW2), self.SIZE,
+                                    encryption=encryption)
         mock_exist.assert_has_calls(exist_calls)
         fn.assert_called_once_with(
             target=self.TEMPLATE_PATH, context=self.CONTEXT)
@@ -719,6 +761,23 @@ class Qcow2TestCase(_ImageTestCase, test.NoDBTestCase):
         self.assertFalse(mock_create.called)
         mock_utime.assert_called()
         mock_detect_format.assert_called_once()
+
+    def test_generate_resized_backing_files(self):
+        self._test_generate_resized_backing_files()
+
+    @mock.patch('nova.crypto.get_encryption_secret',
+                return_value=mock.sentinel.secret)
+    def test_generate_resized_backing_files_with_encryption(self,
+                                                            mock_get_secret):
+        disk_info_mapping = {
+            'encrypted': True,
+            'encryption_format': 'luks',
+            'encryption_secret_uuid': uuids.secret,
+            'encryption_details': objects.EncryptDetails(),
+        }
+        self._test_generate_resized_backing_files(
+            disk_info_mapping=disk_info_mapping)
+        mock_get_secret.assert_called_once_with(self.CONTEXT, uuids.secret)
 
     @mock.patch('nova.virt.images.get_image_format')
     @mock.patch.object(imagebackend.utils, 'synchronized')
@@ -793,6 +852,17 @@ class Qcow2TestCase(_ImageTestCase, test.NoDBTestCase):
         self.assertEqual(imgmodel.LocalFileImage(self.PATH,
                                                  imgmodel.FORMAT_QCOW2),
                         model)
+
+    @mock.patch('nova.virt.image.model.LocalFileImage', autospec=True)
+    @mock.patch('nova.virt.disk.api.extend')
+    def test_resize_image_with_encryption(self, mock_extend, mock_image):
+        image = self.image_class(self.INSTANCE, self.NAME)
+        encryption = {'format': 'luks', 'secret': mock.sentinel.secret}
+        image.resize_image(mock.sentinel.new_size, encryption=encryption)
+        mock_image.assert_called_once_with(self.PATH, imgmodel.FORMAT_QCOW2)
+        mock_extend.assert_called_once_with(
+            mock_image.return_value, mock.sentinel.new_size,
+            encryption=encryption)
 
 
 class LvmTestCase(_ImageTestCase, test.NoDBTestCase):

@@ -530,11 +530,19 @@ class InstanceHelperMixin:
                     'instance.reboot.end')
         return self._wait_for_state_change(server, expected_state)
 
-    def _show_server(self, server):
+    def _show_server(self, server, api=None):
         """This method is to retrieve fresh copy of target server object
+
+        :param server: The server to retrieve
+        :param api: An API client to create the server with; defaults to
+            'self.api'. This can be used to pass in an admin API client to
+            return admin-only fields such as the server host, for example.
+        :returns: The response from the API containing the server details.
         """
+        if api is None:
+            api = self.api
         try:
-            return self.api.get_server(server['id'])
+            return api.get_server(server['id'])
         except api_client.OpenStackApiNotFoundException:
             return server
 

@@ -4237,6 +4237,11 @@ class API:
         # is upgraded to the point of supporting cross-cell resize on all
         # compute services.
         if allowed:
+            # TODO(melwitt): Remove this block when snapshot with ephemeral
+            # encryption is supported.
+            if hardware.get_ephemeral_encryption_constraint(
+                    instance.flavor, instance.image_meta):
+                return False
             # TODO(mriedem): We can remove this minimum compute version check
             # in the 22.0.0 "V" release.
             if min_comp_ver < MIN_COMPUTE_CROSS_CELL_RESIZE:
@@ -4338,7 +4343,27 @@ class API:
                     "other TPM secret security modes is not supported.")
             raise exception.OperationNotSupportedForVTPM(msg)
 
-    @reject_ephemeral_encryption_instances(instance_actions.RESIZE)
+    @staticmethod
+    def _validate_resize_for_ephemeral_encryption(
+            context, instance, current_flavor, new_flavor):
+        # Check that the new flavor does not conflict with the current image.
+        hardware.get_ephemeral_encryption_constraint(
+            new_flavor, instance.image_meta)
+        # Check if this is a request to resize from a flavor without
+        # ephemeral encryption to a flavor with ephemeral encryption and
+        # vice versa.
+        current_flavor_encryption = strutils.bool_from_string(
+            current_flavor.extra_specs.get('hw:ephemeral_encryption'))
+        new_flavor_encryption = strutils.bool_from_string(
+            new_flavor.extra_specs.get('hw:ephemeral_encryption'))
+        if current_flavor_encryption != new_flavor_encryption:
+            reason = _(
+                'Resize from a flavor with ephemeral encryption to a '
+                'flavor without ephemeral encryption and vice versa is not '
+                'allowed.')
+            raise exception.EphemeralEncryptionConflict(
+                action='resize', reason=reason)
+
     @block_shares_not_supported()
     # TODO(stephenfin): This logic would be so much easier to grok if we
     # finally split resize and cold migration into separate code paths
@@ -4465,6 +4490,8 @@ class API:
                 self._validate_flavor_image_nostatus(
                     context, image, new_flavor, root_bdm=None,
                     validate_pci=True)
+            self._validate_resize_for_ephemeral_encryption(
+                context, instance, current_flavor, new_flavor)
 
         filter_properties = {'ignore_hosts': []}
         if not self._allow_resize_to_same_host(same_flavor, instance):

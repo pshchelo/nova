@@ -161,6 +161,28 @@ class APITestCase(test.NoDBTestCase):
 
     @mock.patch.object(api, 'can_resize_image', autospec=True,
                        return_value=True)
+    @mock.patch('oslo_concurrency.processutils.execute', autospec=True)
+    def test_extend_qcow_encryption(self, mock_exec, mock_can_resize):
+        imgfile = '/instances/fake/disk'
+        imgsize = 10
+        image = imgmodel.LocalFileImage(imgfile, imgmodel.FORMAT_QCOW2)
+        encryption = {'secret': mock.sentinel.secret}
+
+        with mock.patch('tempfile.NamedTemporaryFile') as mock_tmp_file:
+            mock_file = mock_tmp_file.return_value.__enter__.return_value
+            mock_file.name = 'fakename'
+            api.extend(image, imgsize, encryption=encryption)
+
+        mock_can_resize.assert_called_once_with(imgfile, imgsize)
+        mock_file.write.assert_called_once_with(mock.sentinel.secret)
+        mock_file.flush.assert_called_once_with()
+        mock_exec.assert_called_once_with(
+            'qemu-img', 'resize', '-f', 'qcow2',
+            '--object', 'secret,id=sec,file=fakename', '--image-opts',
+            f'encrypt.key-secret=sec,file.filename={imgfile}', imgsize)
+
+    @mock.patch.object(api, 'can_resize_image', autospec=True,
+                       return_value=True)
     @mock.patch('nova.privsep.libvirt.ploop_resize')
     def test_extend_ploop(self, mock_ploop_resize, mock_can_resize_image):
         imgfile = tempfile.NamedTemporaryFile()
