@@ -379,7 +379,8 @@ class CreateBackupTestsV21(admin_only_action_common.CommonMixin,
         updates = {'vm_state': 'active',
                    'task_state': None,
                    'launched_at': timeutils.utcnow()}
-        instance = fake_instance.fake_instance_obj(self.context, **updates)
+        instance = fake_instance.fake_instance_obj(
+            self.context, expected_attrs=['system_metadata'], **updates)
         instance.image_ref = None
         self.mock_get.return_value = instance
 

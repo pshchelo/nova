@@ -33,6 +33,7 @@ from nova.compute import power_state
 from nova.compute import task_states
 from nova.compute import vm_states
 import nova.conf
+from nova import crypto
 from nova import exception
 from nova import notifications
 from nova.notifications.objects import aggregate as aggregate_notification
@@ -1673,3 +1674,26 @@ def check_attach_and_reserve_volume(context, volume_api, volume, instance,
     # is "ok".
     if bdm.obj_attr_is_set('id'):
         bdm.save()
+
+
+def delete_bdms_encryption_secrets(context, instance_uuid, bdms):
+    # TODO(melwitt): This will also include the backing file secret UUID when
+    # support for encrypted backing files is added.
+    keys = ['encryption_secret_uuid']
+    # Only consider local BDMs for ephemeral encryption at this time.
+    local_bdms = [bdm for bdm in bdms if bdm.is_local]
+    for local_bdm in local_bdms:
+        for key in keys:
+            secret_uuid = getattr(local_bdm, key, None)
+            if secret_uuid is not None:
+                try:
+                    crypto.delete_encryption_secret(
+                        context, instance_uuid, secret_uuid)
+                except Exception:
+                    # NOTE(melwitt): Ignore all errors here so as not to
+                    # prevent a successful instance delete from the end user's
+                    # perspective. If we fail to delete a secret here, the
+                    # _reclaim_queued_deletes periodic task will try again.
+                    LOG.exception(
+                        f'Failed to delete encryption secret {secret_uuid} '
+                        'from the key manager.', instance_uuid=instance_uuid)

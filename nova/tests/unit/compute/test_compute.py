@@ -8326,7 +8326,9 @@ class ComputeTestCase(BaseTestCase,
                                              'fake_network_info',
                                              'fake_bdi', True)
 
-    def test_complete_partial_deletion(self):
+    @mock.patch('nova.compute.manager.ComputeManager._complete_deletion')
+    @mock.patch('nova.objects.BlockDeviceMappingList.get_by_instance_uuid')
+    def test_complete_partial_deletion(self, mock_get_bdms, mock_deletion):
         admin_context = context.get_admin_context()
         instance = objects.Instance()
         instance.id = 1
@@ -8344,15 +8346,6 @@ class ComputeTestCase(BaseTestCase,
 
         self.stub_out('nova.objects.instance.Instance.destroy', fake_destroy)
         self.stub_out(
-            'nova.db.main.api.block_device_mapping_get_all_by_instance',
-            lambda *a, **k: None)
-        self.stub_out(
-            'nova.compute.manager.ComputeManager._complete_deletion',
-            lambda *a, **k: None)
-        self.stub_out(
-            'nova.objects.quotas.Quotas.reserve',
-            lambda *a, **k: None)
-        self.stub_out(
             'nova.compute.utils.notify_about_instance_usage',
             lambda *a, **k: None)
         self.stub_out(
@@ -8362,6 +8355,48 @@ class ComputeTestCase(BaseTestCase,
         self.compute._complete_partial_deletion(admin_context, instance)
 
         self.assertNotEqual(0, instance.deleted)
+        mock_deletion.assert_called_once_with(
+            admin_context, instance, mock_get_bdms.return_value)
+
+    def test_complete_deletion(self):
+        ctxt = context.get_context()
+        instance = self._create_fake_instance_obj()
+        bdm = objects.BlockDeviceMapping(
+            **fake_block_device.FakeDbBlockDeviceDict({
+                'device_name': '/dev/sda3',
+                'source_type': 'image',
+                'destination_type': 'local',
+                'device_type': 'disk',
+                'guest_format': None,
+                'boot_index': 2,
+                'volume_size': 1,
+                'encryption_secret_uuid': uuids.secret}))
+        bdms = [bdm, bdm]
+
+        with mock.patch.object(self.compute,
+                    '_update_resource_tracker') as mock_update_rt, \
+                mock.patch.object(self.compute.reportclient,
+                    'delete_allocation_for_instance') as mock_delete_alloc, \
+                mock.patch.object(self.compute,
+                    '_clean_instance_console_tokens') as mock_clean_tokens, \
+                mock.patch.object(self.compute,
+                    '_delete_scheduler_instance_info'
+                        ) as mock_delete_scheduler_info, \
+                mock.patch('nova.crypto.delete_encryption_secret'
+                        ) as mock_delete_secret:
+            mock_delete_secret.side_effect = [test.TestingException(), None]
+
+            self.compute._complete_deletion(ctxt, instance, bdms)
+
+            mock_update_rt.assert_called_once_with(ctxt, instance)
+            mock_delete_alloc.assert_called_once_with(
+                ctxt, instance.uuid, force=True)
+            mock_clean_tokens.assert_called_once_with(ctxt, instance)
+            mock_delete_scheduler_info.assert_called_once_with(
+                ctxt, instance.uuid)
+            self.assertEqual(2, mock_delete_secret.call_count)
+            call = mock.call(ctxt, instance.uuid, uuids.secret)
+            mock_delete_secret.assert_has_calls([call, call])
 
     def test_terminate_instance_updates_tracker(self):
         admin_context = context.get_admin_context()

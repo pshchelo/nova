@@ -1841,7 +1841,7 @@ class ComputeManagerUnitTestCase(test.NoDBTestCase,
                 _update_resource_tracker=mock.DEFAULT,
                 _clean_instance_console_tokens=mock.DEFAULT,
                 _delete_scheduler_instance_info=mock.DEFAULT) as mocks:
-            self.compute._complete_deletion(self.context, instance)
+            self.compute._complete_deletion(self.context, instance, bdms=[])
 
         mocks['_update_resource_tracker'].assert_called_once_with(
             self.context, instance)
@@ -9926,6 +9926,11 @@ class ComputeManagerBuildInstanceTestCase(test.NoDBTestCase):
     def test_build_and_run_requested_vram_too_high(self):
         self._test_build_and_run_spawn_exceptions(
             exception.RequestedVRamTooHigh(req_vram=200, max_vram=100))
+
+    def test_build_and_run_encryption_secret_create_failed(self):
+        self._test_build_and_run_spawn_exceptions(
+            exception.EncryptionSecretCreateFailed(
+                name='My secret', error='error'))
 
     def _test_build_and_run_spawn_exceptions(self, exc):
         with test.nested(

@@ -346,6 +346,26 @@ def reject_vdpa_instances(operation, until=None):
     return outer
 
 
+def reject_ephemeral_encryption_instances(operation):
+    """Reject requests to decorated funcs if instance uses ephemeral encryption
+
+    Raise OperationNotSupportedForEphemeralEncryption if instance uses
+    ephemeral encryption.
+    """
+
+    def outer(f):
+        @functools.wraps(f)
+        def inner(self, context, instance, *args, **kw):
+            if hardware.get_ephemeral_encryption_constraint(
+                instance.flavor, instance.image_meta,
+            ):
+                raise exception.OperationNotSupportedForEphemeralEncryption(
+                    instance_uuid=instance.uuid, operation=operation)
+            return f(self, context, instance, *args, **kw)
+        return inner
+    return outer
+
+
 def load_cells():
     global CELLS
     if not CELLS:
@@ -2401,7 +2421,7 @@ class API:
             return True
         return False
 
-    def _local_delete_cleanup(self, context, instance_uuid):
+    def _local_delete_cleanup(self, context, instance_uuid, bdms=None):
         # NOTE(aarents) Ensure instance allocation is cleared and instance
         # mapping queued as deleted before _delete() return
         try:
@@ -2417,6 +2437,13 @@ class API:
             LOG.info("Instance Mapping does not exist while attempting "
                      "local delete cleanup.",
                      instance_uuid=instance_uuid)
+
+        # Clean up ephemeral encryption secrets if needed.
+        if bdms is None:
+            bdms = objects.BlockDeviceMappingList.get_by_instance_uuid(
+                context, instance_uuid)
+        compute_utils.delete_bdms_encryption_secrets(
+            context, instance_uuid, bdms)
 
     def _attempt_delete_of_buildrequest(self, context, instance):
         # If there is a BuildRequest then the instance may not have been
@@ -2549,7 +2576,8 @@ class API:
                              'field, its vm_state is %(state)s.',
                              {'state': instance.vm_state},
                               instance=instance)
-                    self._local_delete_cleanup(context, instance.uuid)
+                    self._local_delete_cleanup(
+                        context, instance.uuid, bdms=bdms)
                     return
                 except exception.ObjectActionError as ex:
                     # The instance's host likely changed under us as
@@ -2730,6 +2758,11 @@ class API:
             # compute service.
             self.placementclient.delete_allocation_for_instance(
                 context, instance.uuid, force=True)
+
+            # Clean up ephemeral encryption secrets if needed.
+            compute_utils.delete_bdms_encryption_secrets(
+                context, instance.uuid, bdms)
+
             cb(context, instance, bdms, local=True)
             instance.destroy()
 
@@ -3375,6 +3408,7 @@ class API:
                     raise exception.InstanceNotFound(instance_id=instance.uuid)
         return instance
 
+    @reject_ephemeral_encryption_instances(instance_actions.BACKUP)
     # NOTE(melwitt): We don't check instance lock for backup because lock is
     #                intended to prevent accidental change/delete of instances
     @check_instance_state(vm_state=[vm_states.ACTIVE, vm_states.STOPPED,
@@ -3416,6 +3450,7 @@ class API:
                                             rotation)
         return image_meta
 
+    @reject_ephemeral_encryption_instances(instance_actions.CREATE_IMAGE)
     # NOTE(melwitt): We don't check instance lock for snapshot because lock is
     #                intended to prevent accidental change/delete of instances
     @check_instance_state(vm_state=[vm_states.ACTIVE, vm_states.STOPPED,
@@ -3655,6 +3690,7 @@ class API:
             if img_arch:
                 fields_obj.Architecture.canonicalize(img_arch)
 
+    @reject_ephemeral_encryption_instances(instance_actions.REBUILD)
     @block_shares_not_supported()
     @reject_vtpm_instances(instance_actions.REBUILD)
     @block_accelerators(until_service=SUPPORT_ACCELERATOR_SERVICE_FOR_REBUILD)
@@ -4260,6 +4296,7 @@ class API:
                     "other TPM secret security modes is not supported.")
             raise exception.OperationNotSupportedForVTPM(msg)
 
+    @reject_ephemeral_encryption_instances(instance_actions.RESIZE)
     @block_shares_not_supported()
     # TODO(stephenfin): This logic would be so much easier to grok if we
     # finally split resize and cold migration into separate code paths
@@ -4517,6 +4554,7 @@ class API:
             allow_same_host = CONF.allow_resize_to_same_host
         return allow_same_host
 
+    @reject_ephemeral_encryption_instances(instance_actions.SHELVE)
     @block_shares_not_supported()
     @block_port_accelerators()
     @reject_vtpm_instances(instance_actions.SHELVE)
@@ -4859,6 +4897,7 @@ class API:
         self._record_action_start(context, instance, instance_actions.RESUME)
         self.compute_rpcapi.resume_instance(context, instance)
 
+    @reject_ephemeral_encryption_instances(instance_actions.RESCUE)
     @reject_vtpm_instances(instance_actions.RESCUE)
     @check_instance_lock
     @check_instance_state(vm_state=[vm_states.ACTIVE, vm_states.STOPPED,
@@ -5541,6 +5580,7 @@ class API:
 
         return _metadata
 
+    @reject_ephemeral_encryption_instances(instance_actions.LIVE_MIGRATION)
     @block_shares_not_supported()
     @block_extended_resource_request
     @block_port_accelerators()
@@ -5679,6 +5719,7 @@ class API:
         self.compute_rpcapi.live_migration_abort(context,
                 instance, migration.id)
 
+    @reject_ephemeral_encryption_instances(instance_actions.EVACUATE)
     @block_shares_not_supported()
     @block_extended_resource_request
     @block_port_accelerators()

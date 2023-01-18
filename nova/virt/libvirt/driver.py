@@ -4677,6 +4677,21 @@ class LibvirtDriver(driver.ComputeDriver):
             context, xml, instance, post_xml_callback=gen_confdrive,
         )
 
+    def _create_and_replace_libvirt_secret(
+        self,
+        secret_usage: str,
+        password: str,
+        secret_uuid: str,
+        description: ty.Optional[str] = None,
+    ) -> None:
+        # Create a libvirt secret and replace the existing secret if one is
+        # found.
+        if self._host.find_secret('volume', secret_usage):
+            self._host.delete_secret('volume', secret_usage)
+        self._host.create_secret(
+            'volume', secret_usage, password=password, uuid=secret_uuid,
+            description=description)
+
     def unrescue(
         self,
         context: nova_context.RequestContext,
@@ -4709,7 +4724,11 @@ class LibvirtDriver(driver.ComputeDriver):
         pass
 
     @staticmethod
-    def _get_or_create_encryption_secret(context, instance, driver_bdm):
+    def _get_or_create_ephemeral_encryption_secret(
+        context: nova_context.RequestContext,
+        instance: 'objects.Instance',
+        driver_bdm: 'nova.virt.block_device.DriverBlockDevice',
+    ) -> ty.Tuple[str, str, bool]:
         created = False
         secret_uuid = driver_bdm.get('encryption_secret_uuid')
         if secret_uuid is None:
@@ -4748,6 +4767,48 @@ class LibvirtDriver(driver.ComputeDriver):
     def _add_ephemeral_encryption_driver_bdm_attrs(
         self,
         context: nova_context.RequestContext,
+        driver_bdm: 'nova.virt.block_device.DriverBlockDevice',
+        instance: 'objects.Instance',
+        created_keymgr_secrets: list[str],
+        created_libvirt_secrets: list[str],
+    ) -> None:
+        # NOTE(lyarwood): Users can request that their ephemeral
+        # storage be encrypted without providing an encryption format
+        # to use. If one isn't provided use the host default here and
+        # record it in the driver BDM.
+        if driver_bdm.get('encryption_format') is None:
+            driver_bdm['encryption_format'] = (
+                CONF.ephemeral_storage_encryption.default_format)
+
+        if driver_bdm.get('encryption_details') is None:
+            driver_bdm['encryption_details'] = objects.EncryptDetails()
+
+        secret_uuid, secret, created = (
+            self._get_or_create_ephemeral_encryption_secret(
+                context, instance, driver_bdm))
+        if created:
+            created_keymgr_secrets.append(secret_uuid)
+
+        # Ensure this is all saved back down in the database via the
+        # o.vo BlockDeviceMapping object
+        driver_bdm.save()
+
+        # Stash the passphrase itself in a libvirt secret using the
+        # same UUID as the key manager secret for easy retrieval later
+        secret_usage = f"{instance.uuid}_{driver_bdm['uuid']}"
+        # Be extra defensive here and delete any existing libvirt
+        # secret to ensure we are creating the secret we retrieved or
+        # created in the key manager just now.
+        description = (
+            "Ephemeral encryption secret for instance "
+            f"{instance.uuid} BDM {driver_bdm['uuid']}")
+        self._create_and_replace_libvirt_secret(
+            secret_usage, secret, secret_uuid, description=description)
+        created_libvirt_secrets.append(secret_usage)
+
+    def _add_all_ephemeral_encryption_driver_bdm_attrs(
+        self,
+        context: nova_context.RequestContext,
         instance: 'objects.Instance',
         block_device_info: dict[str, ty.Any],
     ) -> dict[str, ty.Any] | None:
@@ -4773,40 +4834,15 @@ class LibvirtDriver(driver.ComputeDriver):
 
         try:
             orig_encrypted_bdms = []
-            created_keymgr_secrets = []
-            created_libvirt_secrets = []
+            created_keymgr_secrets: list[str] = []
+            created_libvirt_secrets: list[str] = []
             for driver_bdm in encrypted_bdms:
                 orig_encrypted_bdms.append(deepcopy(driver_bdm))
-                # NOTE(lyarwood): Users can request that their ephemeral
-                # storage be encrypted without providing an encryption format
-                # to use.  If one isn't provided use the host default here and
-                # record it in the driver BDM.
-                if driver_bdm.get('encryption_format') is None:
-                    driver_bdm['encryption_format'] = (
-                        CONF.ephemeral_storage_encryption.default_format)
-
-                secret_uuid, secret, created = (
-                    self._get_or_create_encryption_secret(
-                        context, instance, driver_bdm))
-                if created:
-                    created_keymgr_secrets.append(secret_uuid)
-
-                # Ensure this is all saved back down in the database via the
-                # o.vo BlockDeviceMapping object
-                driver_bdm.save()
-
-                # Stash the passphrase itself in a libvirt secret using the
-                # same UUID as the key manager secret for easy retrieval later
-                secret_usage = f"{instance.uuid}_{driver_bdm['uuid']}"
-                # Be extra defensive here and delete any existing libvirt
-                # secret to ensure we are creating the secret we retrieved or
-                # created in the key manager just now.
-                if self._host.find_secret('volume', secret_usage):
-                    self._host.delete_secret('volume', secret_usage)
-                self._host.create_secret(
-                    'volume', secret_usage, password=secret, uuid=secret_uuid)
-                created_libvirt_secrets.append(secret_usage)
+                self._add_ephemeral_encryption_driver_bdm_attrs(
+                    context, driver_bdm, instance, created_keymgr_secrets,
+                    created_libvirt_secrets)
         except Exception:
+            # Clean up key manager secrets we created.
             for secret_uuid in created_keymgr_secrets:
                 try:
                     crypto.delete_encryption_secret(
@@ -4815,13 +4851,14 @@ class LibvirtDriver(driver.ComputeDriver):
                     LOG.exception(
                         f'Failed to delete encryption secret '
                         f'{secret_uuid} in the key manager', instance=instance)
-
+            # Reset driver BDM encryption attributes back to their original
+            # values.
             for i, orig_driver_bdm in enumerate(orig_encrypted_bdms):
                 driver_bdm = encrypted_bdms[i]
                 for key in ('encryption_format', 'encryption_secret_uuid'):
                     driver_bdm[key] = orig_driver_bdm[key]
                 driver_bdm.save()
-
+            # Clean up libvirt secrets we created.
             for secret_usage in created_libvirt_secrets:
                 try:
                     if self._host.find_secret('volume', secret_usage):
@@ -4830,6 +4867,7 @@ class LibvirtDriver(driver.ComputeDriver):
                     LOG.exception(
                         f'Failed to delete libvirt secret {secret_usage}',
                         instance=instance)
+            # Re-raise the exception.
             raise
 
         return block_device_info
@@ -4844,8 +4882,9 @@ class LibvirtDriver(driver.ComputeDriver):
         # This avoids having to pass block_device_info and the driver bdms down
         # into the imagebackend later when creating or building the config for
         # the disks.
-        block_device_info = self._add_ephemeral_encryption_driver_bdm_attrs(
-            context, instance, block_device_info)
+        block_device_info = (
+            self._add_all_ephemeral_encryption_driver_bdm_attrs(
+                context, instance, block_device_info))
 
         disk_info = blockinfo.get_disk_info(CONF.libvirt.virt_type,
                                             instance,
@@ -12053,13 +12092,18 @@ class LibvirtDriver(driver.ComputeDriver):
                       {'image_id': image_id, 'host': fallback_from_host},
                       instance=instance)
 
-            def copy_from_host(target):
+            def copy_from_host(target, context=None):
+                """Fetch function for a copy from host fallback.
+
+                The 'context' keyword argument is not used here but as a fetch
+                func, we need the signature match all other fetch funcs.
+                """
                 libvirt_utils.copy_image(src=target,
                                          dest=target,
                                          host=fallback_from_host,
                                          receive=True)
             image.cache(fetch_func=copy_from_host, size=size,
-                        filename=filename)
+                        filename=filename, context=context)
 
         # NOTE(lyarwood): If the instance vm_state is shelved offloaded then we
         # must be unshelving for _try_fetch_image_cache to be called.
@@ -12144,7 +12188,8 @@ class LibvirtDriver(driver.ComputeDriver):
                         filename=cache_name,
                         size=info['virt_disk_size'],
                         ephemeral_size=info['virt_disk_size'] / units.Gi,
-                        safe=True)
+                        safe=True,
+                        context=context)
                 elif cache_name.startswith('swap'):
                     flavor = instance.get_flavor()
                     swap_mb = flavor.swap
@@ -12152,7 +12197,8 @@ class LibvirtDriver(driver.ComputeDriver):
                                 filename="swap_%s" % swap_mb,
                                 size=swap_mb * units.Mi,
                                 swap_mb=swap_mb,
-                                safe=True)
+                                safe=True,
+                                context=context)
                 else:
                     self._try_fetch_image_cache(disk,
                                                 libvirt_utils.fetch_image,

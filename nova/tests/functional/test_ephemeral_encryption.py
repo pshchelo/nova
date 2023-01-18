@@ -35,6 +35,10 @@ class _TestEphemeralEncryptionBase(
 
     def setUp(self):
         super().setUp()
+        # Use a fake key manager service.
+        self.flags(
+            backend='castellan.tests.unit.key_manager.mock_key_manager.'
+                'MockKeyManager', group='key_manager')
 
         self.ctxt = context.get_admin_context()
 

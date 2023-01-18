@@ -189,14 +189,15 @@ class LibvirtImageBackendFixture(fixtures.Fixture):
             else:
                 disk.exists.return_value = True
 
+            # Call through to Image.get_encryption()
+            disk.get_encryption.side_effect = functools.partial(
+                imagebackend.Image.get_encryption, disk)
+
             return disk
 
         # Set the SUPPORTS_CLONE member variable to mimic the Image base
         # class.
         image_init.SUPPORTS_CLONE = False
-        # Set the SUPPORTS_LUKS member variable to mimic the Image base
-        # class.
-        image_init.SUPPORTS_LUKS = False
 
         # Ditto for the 'is_shared_block_storage' and
         # 'is_file_in_instance_path' functions

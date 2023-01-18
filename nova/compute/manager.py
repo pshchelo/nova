@@ -1039,8 +1039,7 @@ class ComputeManager(manager.Manager):
         instance.destroy()
         bdms = objects.BlockDeviceMappingList.get_by_instance_uuid(
                 context, instance.uuid)
-        self._complete_deletion(context,
-                                instance)
+        self._complete_deletion(context, instance, bdms)
         self._notify_about_instance_usage(context, instance, "delete.end")
         compute_utils.notify_about_instance_action(context, instance,
                 self.host, action=fields.NotificationAction.DELETE,
@@ -1049,7 +1048,7 @@ class ComputeManager(manager.Manager):
     def _complete_deletion_vtpm(self, context, instance):
         vtpm.delete_secret(context, instance)
 
-    def _complete_deletion(self, context, instance):
+    def _complete_deletion(self, context, instance, bdms):
         self._update_resource_tracker(context, instance)
 
         # If we're configured to do deferred deletes, don't force deletion of
@@ -1062,6 +1061,8 @@ class ComputeManager(manager.Manager):
 
         self._clean_instance_console_tokens(context, instance)
         self._delete_scheduler_instance_info(context, instance.uuid)
+        compute_utils.delete_bdms_encryption_secrets(
+            context, instance.uuid, bdms)
 
         # Delete the vTPM secret in the key manager service if needed.
         self._complete_deletion_vtpm(context, instance)
@@ -2890,7 +2891,8 @@ class ComputeManager(manager.Manager):
                 exception.InvalidInput,
                 # TODO(mriedem): We should be validating RequestedVRamTooHigh
                 # in the API during server create and rebuild.
-                exception.RequestedVRamTooHigh) as e:
+                exception.RequestedVRamTooHigh,
+                exception.EncryptionSecretCreateFailed) as e:
             self._notify_about_instance_usage(context, instance,
                     'create.error', fault=e)
             compute_utils.notify_about_instance_create(
@@ -3523,7 +3525,7 @@ class ComputeManager(manager.Manager):
         # Delete Cyborg ARQs if the instance has a device profile.
         compute_utils.delete_arqs_if_needed(context, instance)
 
-        self._complete_deletion(context, instance)
+        self._complete_deletion(context, instance, bdms)
         # only destroy the instance in the db if the _complete_deletion
         # doesn't raise and therefore allocation is successfully
         # deleted in placement

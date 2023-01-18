@@ -613,6 +613,11 @@ class OperationNotSupportedForVDPAInterface(NotSupported):
     )
 
 
+class OperationNotSupportedForEphemeralEncryption(NotSupported):
+    msg_fmt = _("Operation '%(operation)s' not supported for ephemeral "
+                "encrypted instance (%(instance_uuid)s).")
+
+
 class InvalidHypervisorType(Invalid):
     msg_fmt = _("The supplied hypervisor type of is invalid.")
 
