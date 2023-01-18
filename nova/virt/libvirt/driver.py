@@ -3868,13 +3868,15 @@ class LibvirtDriver(driver.ComputeDriver):
         timer.start(interval=0.5).wait()
 
     @staticmethod
-    def _rebase_with_qemu_img(source_path, rebase_base):
+    def _rebase_with_qemu_img(source_path, rebase_base, encryption=None):
         """Rebase a disk using qemu-img.
 
         :param source_path: the disk source path to rebase
         :type source_path: string
         :param rebase_base: the new parent in the backing chain
         :type rebase_base: None or string
+        :param encryption: encryption attributes such as format and passphrase
+        :type encryption: dict
         """
 
         if rebase_base is None:
@@ -3907,11 +3909,35 @@ class LibvirtDriver(driver.ComputeDriver):
             b_file_fmt = images.qemu_img_info(backing_file_abs).file_format
             qemu_img_extra_arg = ['-F', b_file_fmt]
 
-        qemu_img_extra_arg.append(source_path)
-        # execute operation with disk concurrency semaphore
-        with compute_utils.disk_ops_semaphore:
-            processutils.execute("qemu-img", "rebase", "-b", backing_file,
-                                 *qemu_img_extra_arg)
+        if encryption:
+            with tempfile.NamedTemporaryFile(
+                    mode='tr+', encoding='utf-8') as f:
+                # Write out the passphrase secret to a temp file
+                f.write(encryption.get('secret'))
+
+                # Ensure the secret is written to disk, we can't .close() here
+                # as that removes the file when using NamedTemporaryFile
+                f.flush()
+
+                # Need the secret for the rebase. When --image-opts is used,
+                # the source filename must be passed as part of the option
+                # string instead of as a positional arg.
+                encryption_opts = (
+                    '--object', f"secret,id=sec,file={f.name}",
+                    '--image-opts',
+                    f"encrypt.key-secret=sec,file.filename={source_path}",
+                )
+                # execute operation with disk concurrency semaphore
+                with compute_utils.disk_ops_semaphore:
+                    processutils.execute("qemu-img", "rebase",
+                                         "-b", backing_file,
+                                         *qemu_img_extra_arg, *encryption_opts)
+        else:
+            qemu_img_extra_arg.append(source_path)
+            # execute operation with disk concurrency semaphore
+            with compute_utils.disk_ops_semaphore:
+                processutils.execute("qemu-img", "rebase", "-b", backing_file,
+                                     *qemu_img_extra_arg)
 
     def _volume_snapshot_delete(self, context, instance, volume_id,
                                 snapshot_id, delete_info=None):
@@ -5676,7 +5702,9 @@ class LibvirtDriver(driver.ComputeDriver):
             base_backing_fname = None
 
         LOG.info('Rebasing disk image.', instance=instance)
-        self._rebase_with_qemu_img(backend.path, base_backing_fname)
+        encryption = backend.get_encryption(context)
+        self._rebase_with_qemu_img(
+            backend.path, base_backing_fname, encryption=encryption)
 
     def _create_configdrive(self, context, instance, injection_info,
                             rescue=False):
