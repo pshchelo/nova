@@ -5028,7 +5028,6 @@ class API:
         self._record_action_start(context, instance, instance_actions.RESUME)
         self.compute_rpcapi.resume_instance(context, instance)
 
-    @reject_ephemeral_encryption_instances(instance_actions.RESCUE)
     @reject_vtpm_instances(instance_actions.RESCUE)
     @check_instance_lock
     @check_instance_state(vm_state=[vm_states.ACTIVE, vm_states.STOPPED,

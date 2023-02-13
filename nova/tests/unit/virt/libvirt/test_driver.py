@@ -27958,9 +27958,14 @@ class LibvirtDriverTestCase(test.NoDBTestCase, TraitsComparisonMixin):
 
             return backend, etree.fromstring(domain_xml[0])
 
-    def test_rescue(self):
-        instance = self._create_instance({'config_drive': None})
-        backend, doc = self._test_rescue(instance)
+    def test_rescue(
+            self, instance=None, image_meta_dict=None, block_device_info=None):
+        if instance is None:
+            instance = self._create_instance({'config_drive': None})
+
+        backend, doc = self._test_rescue(
+            instance, image_meta_dict=image_meta_dict,
+            block_device_info=block_device_info)
 
         # Assert that we created the expected set of disks, and no others
         self.assertEqual(['disk.rescue', 'kernel.rescue', 'ramdisk.rescue'],
@@ -27999,6 +28004,83 @@ class LibvirtDriverTestCase(test.NoDBTestCase, TraitsComparisonMixin):
         self.assertEqual(
             [uuids.mdev1],
             doc.xpath("devices/*[@type='mdev']/source/address/@uuid"))
+
+        return backend, doc
+
+    @mock.patch('nova.crypto.get_encryption_secret')
+    @mock.patch.object(
+        libvirt_driver.LibvirtDriver, '_create_and_replace_libvirt_secret')
+    def test_rescue_with_ephemeral_encryption_image_encrypted(
+            self, mock_create_secret, mock_get_secret):
+        # A secret will be retrieved to read the encrypted source image.
+        mock_get_secret.return_value = mock.sentinel.img_secret
+        instance = self._create_instance({'config_drive': None})
+        # Simulate an encrypted rescue image.
+        image_meta_dict = {
+            'id': uuids.image_id,
+            'name': 'fake',
+            'properties': {
+                # This is the secret UUID for the encrypted rescue image.
+                'os_encrypt_key_id': uuids.img_secret,
+                'os_encrypt_format': 'luks',
+            }
+        }
+
+        backend, doc = self.test_rescue(
+            instance=instance, image_meta_dict=image_meta_dict)
+
+        # Verify that the disk.rescue disk is using the same encryption secret
+        # UUID as the image.
+        rescue_disk_path = backend.disks['disk.rescue'].path
+        secret_uuid_xpath = (
+            f"devices/disk[source/@file = '{rescue_disk_path}']/source/"
+            "encryption/secret/@uuid")
+        self.assertEqual([uuids.img_secret], doc.xpath(secret_uuid_xpath))
+
+        # Verify we retrieved the secret for the encrypted source rescue image.
+        mock_get_secret.assert_called_once_with(self.context, uuids.img_secret)
+
+        # Verify we created a libvirt secret for the rescue disk.
+        description = (
+            f"Ephemeral encryption secret for instance {instance.uuid} "
+            "rescue disk")
+        mock_create_secret.assert_called_once_with(
+            f'{instance.uuid}_rescue_disk', mock_get_secret.return_value,
+            uuids.img_secret, description=description)
+
+    def test_rescue_with_ephemeral_encryption_disk_encrypted(self):
+        instance = self._create_instance({'config_drive': None})
+        # Let the block_device_info indicate the root disk using encryption.
+        # We will test whether the root disk retains encryption info during
+        # rescue.
+        block_device_info = {
+            'root_device_name': '/dev/vda',
+            'image': [{
+                'encrypted': True,
+                'encryption_format': 'luks',
+                'encryption_secret_uuid': uuids.secret1,
+                'encryption_details': None,
+            }],
+        }
+
+        backend, doc = self.test_rescue(
+            instance=instance, block_device_info=block_device_info)
+
+        # Verify that the disk.rescue is not using encryption (as the rescue
+        # image was not encrypted).
+        rescue_disk_path = backend.disks['disk.rescue'].path
+        encryption_xpath = (
+            f"devices/disk[source/@file = '{rescue_disk_path}']/source/"
+            "encryption")
+        self.assertEqual([], doc.xpath(encryption_xpath))
+
+        # Verify that the root disk is using encryption and has the correct
+        # secret.
+        disk_path = backend.disks['disk'].path
+        secret_uuid_xpath = (
+            f"devices/disk[source/@file = '{disk_path}']/source/"
+            "encryption/secret/@uuid")
+        self.assertEqual([uuids.secret1], doc.xpath(secret_uuid_xpath))
 
     def test_rescue_with_different_hw_disk_bus(self):
         params = {'config_drive': None, 'root_device_name': '/dev/vda'}
@@ -28087,23 +28169,32 @@ class LibvirtDriverTestCase(test.NoDBTestCase, TraitsComparisonMixin):
                           self.context, instance, network_info,
                           rescue_image_meta, None, None, share_info)
 
-    def test_rescue_stable_device(self):
+    def test_rescue_stable_device(
+            self, instance=None, rescue_image_meta_dict=None,
+            block_device_info=None):
         # Assert the imagebackend behaviour and domain device layout
-        instance = self._create_instance({'config_drive': str(True)})
+        if instance is None:
+            instance = self._create_instance({'config_drive': str(True)})
         inst_image_meta_dict = {'id': uuids.image_id, 'name': 'fake'}
-        rescue_image_meta_dict = {'id': uuids.rescue_image_id,
-                                  'name': 'rescue',
-                                  'properties': {'hw_rescue_device': 'disk',
-                                                 'hw_rescue_bus': 'virtio'}}
-        block_device_info = {'root_device_name': '/dev/vda',
-                             'ephemerals': [
-                                {'guest_format': None,
-                                 'disk_bus': 'virtio',
-                                 'device_name': '/dev/vdb',
-                                 'size': 20,
-                                 'device_type': 'disk'}],
-                             'swap': None,
-                             'block_device_mapping': None}
+        if rescue_image_meta_dict is None:
+            rescue_image_meta_dict = {
+                'id': uuids.rescue_image_id,
+                'name': 'rescue',
+                'properties': {
+                    'hw_rescue_device': 'disk',
+                    'hw_rescue_bus': 'virtio',
+                }
+            }
+        if block_device_info is None:
+            block_device_info = {'root_device_name': '/dev/vda',
+                                 'ephemerals': [
+                                    {'guest_format': None,
+                                     'disk_bus': 'virtio',
+                                     'device_name': '/dev/vdb',
+                                     'size': 20,
+                                     'device_type': 'disk'}],
+                                 'swap': None,
+                                 'block_device_mapping': None}
 
         backend, domain = self._test_rescue(
                                 instance,
@@ -28127,6 +28218,8 @@ class LibvirtDriverTestCase(test.NoDBTestCase, TraitsComparisonMixin):
         disk_path = backend.disks['disk.rescue'].path
         query = "devices/disk[source/@file = '%s']/boot/@order" % disk_path
         self.assertEqual('1', domain.xpath(query)[0])
+
+        return backend, domain
 
     def test_rescue_stable_device_with_volume_attached(self):
         # Assert the imagebackend behaviour and domain device layout
@@ -28329,6 +28422,89 @@ class LibvirtDriverTestCase(test.NoDBTestCase, TraitsComparisonMixin):
         query = "devices/disk[source/@file = '%s']/boot/@order" % disk_path
         self.assertEqual('1', domain.xpath(query)[0])
 
+    @mock.patch('nova.crypto.get_encryption_secret')
+    @mock.patch.object(
+        libvirt_driver.LibvirtDriver, '_create_and_replace_libvirt_secret')
+    def test_rescue_stable_with_ephemeral_encryption_image_encrypted(
+            self, mock_create_secret, mock_get_secret):
+        # A secret will be retrieved to read the encrypted source image.
+        mock_get_secret.return_value = mock.sentinel.img_secret
+        instance = self._create_instance({'config_drive': str(True)})
+        # Simulate an encrypted rescue image.
+        image_meta_dict = {
+            'id': uuids.rescue_image_id,
+            'name': 'rescue',
+            'properties': {
+                'hw_rescue_device': 'disk',
+                'hw_rescue_bus': 'virtio',
+                # This is the secret UUID for the encrypted rescue image.
+                'os_encrypt_key_id': uuids.img_secret,
+                'os_encrypt_format': 'luks',
+            }
+        }
+
+        backend, doc = self.test_rescue_stable_device(
+            instance=instance, rescue_image_meta_dict=image_meta_dict)
+
+        # Verify that the disk.rescue disk is using the same encryption secret
+        # UUID as the image.
+        rescue_disk_path = backend.disks['disk.rescue'].path
+        secret_uuid_xpath = (
+            f"devices/disk[source/@file = '{rescue_disk_path}']/source/"
+            "encryption/secret/@uuid")
+        self.assertEqual([uuids.img_secret], doc.xpath(secret_uuid_xpath))
+
+        # Verify we retrieved the secret for the encrypted source rescue image.
+        mock_get_secret.assert_called_once_with(self.context, uuids.img_secret)
+
+        # Verify we created a libvirt secret for the rescue disk.
+        description = (
+            f"Ephemeral encryption secret for instance {instance.uuid} "
+            "rescue disk")
+        mock_create_secret.assert_called_once_with(
+            f'{instance.uuid}_rescue_disk', mock_get_secret.return_value,
+            uuids.img_secret, description=description)
+
+    def test_rescue_stable_with_ephemeral_encryption_disk_encrypted(self):
+        # Let the block_device_info indicate the root disk using encryption.
+        # We will test whether the root disk retains encryption info during
+        # rescue.
+        block_device_info = {
+            'root_device_name': '/dev/vda',
+            'image': [{
+                'encrypted': True,
+                'encryption_format': 'luks',
+                'encryption_secret_uuid': uuids.secret1,
+                'encryption_details': None,
+            }],
+            'ephemerals': [{
+                'encrypted': True,
+                'encryption_format': 'luks',
+                'encryption_secret_uuid': uuids.secret2,
+                'encryption_details': None,
+            }],
+        }
+
+        backend, doc = self.test_rescue_stable_device(
+            block_device_info=block_device_info)
+
+        # Verify that the disk.rescue is not using encryption (as the rescue
+        # image was not encrypted).
+        rescue_disk_path = backend.disks['disk.rescue'].path
+        encryption_xpath = (
+            f"devices/disk[source/@file = '{rescue_disk_path}']/source/"
+            "encryption")
+        self.assertEqual([], doc.xpath(encryption_xpath))
+
+        # Verify that the root disk is using encryption and has the correct
+        # secret.
+        for item in zip(('disk', 'disk.eph0'), (uuids.secret1, uuids.secret2)):
+            disk_path = backend.disks[item[0]].path
+            secret_uuid_xpath = (
+                f"devices/disk[source/@file = '{disk_path}']/source/"
+                "encryption/secret/@uuid")
+            self.assertEqual([item[1]], doc.xpath(secret_uuid_xpath))
+
     @mock.patch.object(libvirt_utils, 'get_instance_path')
     @mock.patch.object(libvirt_utils, 'load_file')
     @mock.patch.object(host.Host, '_get_domain')
@@ -28387,7 +28563,8 @@ class LibvirtDriverTestCase(test.NoDBTestCase, TraitsComparisonMixin):
             mock_remove_volumes.assert_called_once_with(['lvm.rescue'])
 
     def test_unrescue(self):
-        instance = objects.Instance(uuid=uuids.instance, id=1)
+        instance = objects.Instance(
+            uuid=uuids.instance, id=1, system_metadata={})
         self._test_unrescue(instance)
 
     @mock.patch.object(rbd_utils.RBDDriver, '_destroy_volume')
@@ -28399,7 +28576,8 @@ class LibvirtDriverTestCase(test.NoDBTestCase, TraitsComparisonMixin):
                           mock_disconnect, mock_destroy_volume):
         self.flags(images_type='rbd', group='libvirt')
         mock_connect.return_value = mock.MagicMock(), mock.MagicMock()
-        instance = objects.Instance(uuid=uuids.instance, id=1)
+        instance = objects.Instance(
+            uuid=uuids.instance, id=1, system_metadata={})
         all_volumes = [uuids.other_instance + '_disk',
                        uuids.other_instance + '_disk.rescue',
                        instance.uuid + '_disk',
@@ -28408,6 +28586,20 @@ class LibvirtDriverTestCase(test.NoDBTestCase, TraitsComparisonMixin):
         self._test_unrescue(instance)
         mock_destroy_volume.assert_called_once_with(
             mock.ANY, instance.uuid + '_disk.rescue')
+
+    @mock.patch('nova.virt.libvirt.host.Host.delete_secret')
+    @mock.patch('nova.virt.libvirt.host.Host.find_secret')
+    def test_unrescue_with_ephemeral_encryption(
+            self, mock_find_secret, mock_delete_secret):
+        mock_find_secret.return_value = mock.Mock()
+
+        instance = objects.Instance(uuid=uuids.instance, id=1)
+        self._test_unrescue(instance)
+        # We should have deleted the rescue disk libvirt secret.
+        mock_find_secret.assert_called_once_with(
+            'volume', f'{instance.uuid}_rescue_disk')
+        mock_delete_secret.assert_called_once_with(
+            'volume', f'{instance.uuid}_rescue_disk')
 
     @mock.patch('shutil.rmtree')
     @mock.patch('os.rename')

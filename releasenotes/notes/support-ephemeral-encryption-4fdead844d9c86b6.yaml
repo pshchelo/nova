@@ -21,6 +21,7 @@ features:
     * live migration
     * rebuild
     * evacuate
+    * rescue
 
     .. note::
 

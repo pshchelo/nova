@@ -39,6 +39,7 @@ import operator
 import os
 import pwd
 import random
+import re
 import shutil
 import sys
 import tempfile
@@ -932,6 +933,14 @@ class LibvirtDriver(driver.ComputeDriver):
         self._register_all_undefined_instance_details(instances)
 
         self._cleanup_unused_ephemeral_encryption_secrets(instances)
+
+        if CONF.libvirt.rescue_image_id:
+            LOG.info(
+                'Configuration of [libvirt]rescue_image_id was detected. '
+                'It is recommended not to use an encrypted image for the '
+                'default rescue image as doing so would require that all end '
+                'users have permissions to access the secret indicated in the '
+                'os_encrypt_key_id image property of the rescue image.')
 
     def _check_pci_whitelist(self):
 
@@ -1903,10 +1912,12 @@ class LibvirtDriver(driver.ComputeDriver):
     def _cleanup_unused_ephemeral_encryption_secrets(self, instances):
         # First make a list of the guest secrets that are in use on this host.
         bdms = objects.BlockDeviceMappingList()
+        instance_uuids = set()
         for instance in instances:
             if hardware.get_ephemeral_encryption_constraint(
                     instance.flavor, instance.image_meta):
                 bdms += instance.get_bdms()
+            instance_uuids.add(instance.uuid)
         secret_uuids_in_use = set()
         for bdm in bdms:
             keys = ('encryption_secret_uuid', 'backing_encryption_secret_uuid')
@@ -1923,12 +1934,24 @@ class LibvirtDriver(driver.ComputeDriver):
             config = vconfig.LibvirtConfigSecret()
             config.parse_str(secret.XMLDesc(0))
 
-            if (config.description is not None and
-                    config.description.startswith('Ephemeral encryption') and
-                        config.uuid not in secret_uuids_in_use):
+            if config.description is not None:
+                # Rescue disks do not have BDM records, so their secret UUIDs
+                # will never be in secret_uuids_in_use. Instead, if we
+                # encounter a rescue disk secret, we will consider it to be in
+                # use if the instance associated with it is on this host.
+                m = re.match(
+                    r'Ephemeral encryption secret for instance '
+                    '([A-Za-z0-9-]+) rescue disk', config.description)
+                if m and m.group(1) in instance_uuids:
+                    continue
+                elif (not config.description.startswith(
+                        'Ephemeral encryption') or
+                            config.uuid in secret_uuids_in_use):
+                    continue
+
                 LOG.info(
-                    f'Cleaning up unused libvirt secret {config.uuid} with '
-                    f'usage: {config.usage_id} and description: '
+                    f'Cleaning up unused libvirt secret {config.uuid} '
+                    f'with usage: {config.usage_id} and description: '
                     f'{config.description}')
                 try:
                     self._host.delete_secret('volume', config.usage_id)
@@ -4738,18 +4761,47 @@ class LibvirtDriver(driver.ComputeDriver):
             f.write(unrescue_xml)
 
         rescue_image_id = None
+        # This will be the image metadata for the specified rescue image
+        # (stable rescue). It will remain None if this is not a stable rescue.
         rescue_image_meta = None
+        # NOTE(melwitt): image_meta.id should always be set because the compute
+        # manager calls ImageMeta.from_image_ref() which always sets it.
+        # So ... it doesn't look like there is any way to actually use the
+        # CONF.libvirt.rescue_image_id setting because rescue_image_id will
+        # never be None here.
         if image_meta.obj_attr_is_set("id"):
             rescue_image_id = image_meta.id
 
+        rescue_image_id = (
+            rescue_image_id or
+            CONF.libvirt.rescue_image_id or
+            instance.image_ref)
+
+        LOG.info(
+            f'Using image {rescue_image_id} as rescue image',
+            instance=instance)
+
+        # NOTE(melwitt): If we're going to use the configured rescue image,
+        # replace image_meta from the compute manager with the image metadata
+        # from CONF.libvirt.rescue_image_id. Ideally we would determine which
+        # image_meta to pass to driver rescue in the compute manager instead of
+        # replacing it here, but this config based rescue_image_id is libvirt
+        # specific.
+        if rescue_image_id == CONF.libvirt.rescue_image_id:
+            image_meta = objects.ImageMeta.from_image_ref(
+                context, self._image_api, CONF.libvirt.rescue_image_id)
+
         rescue_images = {
-            'image_id': (rescue_image_id or
-                        CONF.libvirt.rescue_image_id or instance.image_ref),
+            'image_id': rescue_image_id,
             'kernel_id': (CONF.libvirt.rescue_kernel_id or
                           instance.kernel_id),
             'ramdisk_id': (CONF.libvirt.rescue_ramdisk_id or
                            instance.ramdisk_id),
         }
+
+        # We will need the original block_device_info later if this is a legacy
+        # rescue in order to add encryption attributes.
+        original_block_device_info = block_device_info
 
         virt_type = CONF.libvirt.virt_type
         if hardware.check_hw_rescue_props(image_meta):
@@ -4795,9 +4847,21 @@ class LibvirtDriver(driver.ComputeDriver):
             # block_device_info to the get_disk_info call.
             block_device_info = None
 
-        disk_info = blockinfo.get_disk_info(virt_type, instance, image_meta,
-            rescue=True, block_device_info=block_device_info,
+        # This will generate a new disk mapping and in the case of a legacy
+        # rescue, the mapping will be built from scratch and will not take into
+        # account the existing block_device_info. This means that if the
+        # block_device_info contains encryption attributes, the new disk_info
+        # will not contain any.
+        disk_info = blockinfo.get_disk_info(
+            virt_type, instance, image_meta, rescue=True,
+            block_device_info=block_device_info,
             rescue_image_meta=rescue_image_meta)
+
+        # Handle ephemeral encryption if needed.
+        self._update_disk_info_for_rescue_with_encryption(
+            context, instance, rescue_image_id, image_meta, rescue_image_meta,
+            disk_info, original_block_device_info)
+
         LOG.debug("rescue generated disk_info: %s", disk_info)
 
         injection_info = InjectionInfo(network_info=network_info,
@@ -4843,6 +4907,84 @@ class LibvirtDriver(driver.ComputeDriver):
             'volume', secret_usage, password=password, uuid=secret_uuid,
             description=description)
 
+    def _update_disk_info_for_rescue_with_encryption(
+        self,
+        context: nova_context.RequestContext,
+        instance: 'objects.Instance',
+        rescue_image_id: str,
+        image_meta: 'objects.ImageMeta',
+        rescue_image_meta: 'objects.ImageMeta',
+        disk_info: ty.Dict[str, ty.Any],
+        original_block_device_info: ty.Dict[str, ty.Any],
+    ) -> None:
+        """Update disk_info with encryption attributes, if needed.
+
+        This will generate a new disk mapping and in the case of a legacy
+        rescue, the mapping will be built from scratch and will not take into
+        account the existing block_device_info. This means that if the
+        block_device_info contains encryption attributes, the new disk_info
+        will not contain any.
+        """
+        # If the rescue image is encrypted, we will generate an encrypted
+        # rescue disk to avoid essentially creating an unencrypted copy of the
+        # rescue image.
+        active_image_meta = rescue_image_meta or image_meta
+        assert rescue_image_id == active_image_meta.id
+
+        img_secret_uuid = active_image_meta.properties.get('os_encrypt_key_id')
+        if img_secret_uuid:
+            img_encryption_format = active_image_meta.properties.get(
+                'os_encrypt_format')
+            if not img_encryption_format:
+                reason = _(
+                    'If os_encrypt_key_id is set in image properties, then '
+                    'os_encrypt_format must also be set')
+                raise exception.ImageUnacceptable(
+                    image_id=active_image_meta.id, reason=reason)
+
+            # Add encryption info to the disk mapping and use the same
+            # passphrase as the image, for simplicity.
+            rescue_encryption = {
+                'encrypted': True,
+                'encryption_secret_uuid': img_secret_uuid,
+                'encryption_format': img_encryption_format,
+                'encryption_details': objects.EncryptDetails(),
+                'backing_encryption_secret_uuid': img_secret_uuid,
+            }
+            disk_info['mapping']['disk.rescue'].update(rescue_encryption)
+
+            # If the source image is encrypted, its secret
+            # should already exist. If it doesn't, something is
+            # wrong.
+            secret = crypto.get_encryption_secret(context, img_secret_uuid)
+            if secret is None:
+                msg = (
+                    f'Failed to find encryption secret {img_secret_uuid} in '
+                    f'the key manager for rescue image {rescue_image_id}')
+                raise exception.EphemeralEncryptionSecretNotFound(_(msg))
+            secret_usage = f'{instance.uuid}_rescue_disk'
+            # Be extra defensive here and delete any existing libvirt
+            # secret to ensure we are creating the secret we retrieved from
+            # the key manager just now.
+            description = (
+                f"Ephemeral encryption secret for instance {instance.uuid} "
+                "rescue disk")
+            self._create_and_replace_libvirt_secret(
+                secret_usage, secret, img_secret_uuid, description=description)
+
+        # If this is not a stable rescue, we need to add encryption
+        # info back to the image disk if it is encrypted.
+        if rescue_image_meta is None:
+            # We need to use the original block_device_info here
+            # because block_device_info will have been set to None for
+            # legacy rescue earlier in this method.
+            image_bdms = driver.block_device_info_get_image(
+                original_block_device_info)
+            if image_bdms:
+                image_bdm = image_bdms[0]
+                disk_info['mapping']['disk'].update(
+                    blockinfo.get_encryption_info_from_bdm(image_bdm))
+
     def unrescue(
         self,
         context: nova_context.RequestContext,
@@ -4870,6 +5012,11 @@ class LibvirtDriver(driver.ComputeDriver):
             filter_fn = lambda disk: (disk.startswith(instance.uuid) and
                                       disk.endswith('.rescue'))
             rbd_utils.RBDDriver().cleanup_volumes(filter_fn)
+
+        # Delete the libvirt secret for the rescue disk if it was encrypted.
+        secret_usage = f'{instance.uuid}_rescue_disk'
+        if self._host.find_secret('volume', secret_usage):
+            self._host.delete_secret('volume', secret_usage)
 
     def poll_rebooting_instances(self, timeout, instances):
         pass

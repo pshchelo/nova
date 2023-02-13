@@ -359,6 +359,20 @@ def get_config_drive_type():
     return config_drive_type
 
 
+def get_encryption_info_from_bdm(bdm):
+    bdm_info = {}
+
+    if bdm.get('encrypted'):
+        bdm_info['encrypted'] = bdm.get('encrypted')
+        bdm_info['encryption_secret_uuid'] = bdm.get('encryption_secret_uuid')
+        bdm_info['backing_encryption_secret_uuid'] = bdm.get(
+            'backing_encryption_secret_uuid')
+        bdm_info['encryption_format'] = bdm.get('encryption_format')
+        bdm_info['encryption_details'] = bdm.get('encryption_details')
+
+    return bdm_info
+
+
 def get_info_from_bdm(instance, virt_type, image_meta, bdm,
                       mapping=None, disk_bus=None,
                       dev_type=None, allowed_types=None,
@@ -402,13 +416,7 @@ def get_info_from_bdm(instance, virt_type, image_meta, bdm,
         bdm_info['boot_index'] = str(boot_index + 1)
 
     # If the device is encrypted pass through the secret, format and details
-    if bdm.get('encrypted'):
-        bdm_info['encrypted'] = bdm.get('encrypted')
-        bdm_info['encryption_secret_uuid'] = bdm.get('encryption_secret_uuid')
-        bdm_info['backing_encryption_secret_uuid'] = bdm.get(
-            'backing_encryption_secret_uuid')
-        bdm_info['encryption_format'] = bdm.get('encryption_format')
-        bdm_info['encryption_details'] = bdm.get('encryption_details')
+    bdm_info.update(get_encryption_info_from_bdm(bdm))
 
     return bdm_info
 

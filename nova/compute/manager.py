@@ -5380,6 +5380,10 @@ class ComputeManager(manager.Manager):
             self.driver.rescue(context, instance, network_info,
                                rescue_image_meta, admin_password,
                                block_device_info, share_info)
+        except exception.EphemeralEncryptionSecretNotFound:
+            # Let the instance action event show an error but do not put the
+            # instance into ERROR state.
+            raise
         except Exception as e:
             LOG.exception("Error trying to Rescue Instance",
                           instance=instance)

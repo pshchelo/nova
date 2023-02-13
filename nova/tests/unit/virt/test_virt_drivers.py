@@ -285,7 +285,9 @@ class _VirtDriverTestCase(_FakeDriverBackendTestCase):
                                                   network_info, share_info)
 
     @catch_notimplementederror
-    def test_rescue(self):
+    @mock.patch('nova.objects.ImageMeta.from_image_ref')
+    def test_rescue(self, mock_from_image_ref):
+        mock_from_image_ref.return_value = objects.ImageMeta.from_dict({})
         # Set the rescue image id to an existing image so that it will be found
         # when querying glance for the image properties.
         image_meta = objects.ImageMeta.from_dict(
@@ -301,8 +303,10 @@ class _VirtDriverTestCase(_FakeDriverBackendTestCase):
         self.connection.unrescue(self.ctxt, instance_ref)
 
     @catch_notimplementederror
+    @mock.patch('nova.objects.ImageMeta.from_image_ref')
     @mock.patch('os.unlink')
-    def test_unrescue_rescued_instance(self, mock_unlink):
+    def test_unrescue_rescued_instance(self, mock_unlink, mock_from_image_ref):
+        mock_from_image_ref.return_value = objects.ImageMeta.from_dict({})
         # Set the rescue image id to an existing image so that it will be found
         # when querying glance for the image properties.
         image_meta = objects.ImageMeta.from_dict(
