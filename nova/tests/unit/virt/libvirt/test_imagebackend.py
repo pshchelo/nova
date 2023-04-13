@@ -469,17 +469,44 @@ class FlatTestCase(_ImageTestCase, test.NoDBTestCase):
     @mock.patch.object(imagebackend.disk, 'extend')
     @mock.patch('nova.virt.libvirt.utils.copy_image')
     @mock.patch.object(imagebackend.utils, 'synchronized')
-    def test_create_image_generated(self, mock_sync, mock_copy, mock_extend):
+    def test_create_image_generated(
+            self, mock_sync, mock_copy, mock_extend, encryption=None):
         mock_sync.side_effect = lambda *a, **kw: self._fake_deco
         fn = mock.MagicMock()
-        image = self.image_class(self.INSTANCE, self.NAME)
+        disk_info = None
+        if encryption is not None:
+            disk_info = {
+                'bus': 'virtio',
+                'dev': '/dev/vda',
+                'type': 'disk',
+                'encrypted': True,
+                'encryption_secret_uuid': uuids.secret,
+                'encryption_format': 'luks',
+                'encryption_details': encryption['details'],
+            }
+        image = self.image_class(
+            self.INSTANCE, self.NAME, disk_info_mapping=disk_info)
 
-        image.create_image(fn, self.TEMPLATE_PATH, None)
+        kwargs = {'context': self.CONTEXT}
+        image.create_image(fn, self.TEMPLATE_PATH, None, **kwargs)
 
-        fn.assert_called_once_with(target=self.PATH)
+        fn.assert_called_once_with(
+            target=self.PATH, src_encryption=None, dest_encryption=encryption,
+            **kwargs)
         self.assertFalse(mock_copy.called)
         self.assertTrue(mock_sync.called)
         self.assertFalse(mock_extend.called)
+
+    @mock.patch('nova.crypto.get_encryption_secret')
+    def test_create_image_generated_with_encryption(self, mock_get_secret):
+        mock_get_secret.return_value = mock.sentinel.secret
+        encryption = {
+            'format': 'luks',
+            'secret': mock.sentinel.secret,
+            'details': objects.EncryptDetails(),
+        }
+        self.test_create_image_generated(encryption=encryption)
+        mock_get_secret.assert_called_once_with(self.CONTEXT, uuids.secret)
 
     @mock.patch.object(imagebackend.disk, 'extend')
     @mock.patch('nova.virt.libvirt.utils.copy_image')
@@ -502,7 +529,100 @@ class FlatTestCase(_ImageTestCase, test.NoDBTestCase):
         self.assertTrue(mock_sync.called)
         mock_extend.assert_called_once_with(
             imgmodel.LocalFileImage(self.PATH, imgmodel.FORMAT_RAW),
-            self.SIZE)
+            self.SIZE, encryption=None)
+        mock_qemu.assert_called_once_with(self.TEMPLATE_PATH)
+        mock_utime.assert_called()
+
+    @mock.patch.object(os.path, 'exists')
+    @mock.patch.object(imagebackend.Flat, 'correct_format',
+                       new=mock.Mock())
+    @mock.patch('nova.crypto.get_encryption_secret')
+    def test_create_image_generating_resize_with_encryption(
+            self, mock_get_secret, mock_exists):
+        fn = mock.MagicMock()
+        # raw (luks) image exists
+        mock_exists.side_effect = [True]
+
+        encryption_details = objects.EncryptDetails()
+        disk_info = {
+            'bus': 'virtio',
+            'dev': '/dev/vda',
+            'type': 'disk',
+            'encrypted': True,
+            'encryption_secret_uuid': uuids.secret,
+            'encryption_format': 'luks',
+            'encryption_details': encryption_details,
+        }
+        image = self.image_class(
+            self.INSTANCE, self.NAME, disk_info_mapping=disk_info)
+        image.resize_image = mock.Mock()
+
+        expected_encryption = {
+            'format': 'luks',
+            'secret': mock_get_secret.return_value,
+            'details': encryption_details,
+        }
+        kwargs = {'context': self.CONTEXT}
+
+        image.create_image(fn, self.TEMPLATE_PATH, self.SIZE, **kwargs)
+
+        mock_get_secret.assert_called_once_with(self.CONTEXT, uuids.secret)
+        fn.assert_not_called()
+        image.resize_image.assert_called_once_with(
+            self.SIZE, encryption=expected_encryption)
+
+    @mock.patch.object(os.path, 'exists')
+    @mock.patch.object(imagebackend.Flat, 'correct_format',
+                       new=mock.Mock())
+    @mock.patch('nova.crypto.get_encryption_secret')
+    @mock.patch('nova.virt.images.convert_image')
+    @mock.patch.object(imagebackend.disk, 'extend')
+    @mock.patch('nova.virt.libvirt.utils.copy_image')
+    @mock.patch.object(imagebackend.utils, 'synchronized')
+    @mock.patch.object(images, 'qemu_img_info',
+                       return_value=imageutils.QemuImgInfo())
+    @mock.patch('nova.privsep.path.utime')
+    def test_create_image_extend_with_encryption(
+            self, mock_utime, mock_qemu, mock_sync, mock_copy, mock_extend,
+            mock_convert, mock_get_secret, mock_exists):
+        mock_sync.side_effect = lambda *a, **kw: self._fake_deco
+        # base image does not exist, raw (luks) image does not exist
+        mock_exists.side_effect = [False, False]
+        fn = mock.MagicMock()
+        mock_qemu.return_value.virtual_size = 1024
+        fn(target=self.TEMPLATE_PATH, image_id=None)
+        encryption_details = objects.EncryptDetails()
+        disk_info = {
+            'bus': 'virtio',
+            'dev': '/dev/vda',
+            'type': 'disk',
+            'encrypted': True,
+            'encryption_secret_uuid': uuids.secret,
+            'encryption_format': 'luks',
+            'encryption_details': encryption_details,
+        }
+        expected_encryption = {
+            'format': 'luks',
+            'secret': mock_get_secret.return_value,
+            'details': encryption_details,
+        }
+        kwargs = {'context': self.CONTEXT}
+
+        image = self.image_class(
+            self.INSTANCE, self.NAME, disk_info_mapping=disk_info)
+
+        image.create_image(fn, self.TEMPLATE_PATH,
+                           self.SIZE, image_id=None, **kwargs)
+
+        mock_copy.assert_not_called()
+        self.assertTrue(mock_sync.called)
+        mock_get_secret.assert_called_once_with(self.CONTEXT, uuids.secret)
+        mock_convert.assert_called_once_with(
+            self.TEMPLATE_PATH, self.PATH, 'raw', 'luks', src_encryption=None,
+            dest_encryption=expected_encryption)
+        mock_extend.assert_called_once_with(
+            imgmodel.LocalFileImage(self.PATH, imgmodel.FORMAT_RAW),
+            self.SIZE, encryption=expected_encryption)
         mock_qemu.assert_called_once_with(self.TEMPLATE_PATH)
         mock_utime.assert_called()
 
@@ -536,6 +656,45 @@ class FlatTestCase(_ImageTestCase, test.NoDBTestCase):
         self.assertEqual(imgmodel.LocalFileImage(self.PATH,
                                                  imgmodel.FORMAT_RAW),
                          model)
+
+    @mock.patch.object(imagebackend.images, 'qemu_img_info')
+    def test_get_driver_format(self, mock_info):
+        # 'luks' is not a valid driver format for libvirt, so it should return
+        # 'raw' in that case.
+        data = mock.Mock()
+        data.file_format = 'luks'
+        mock_info.return_value = data
+        image = self.image_class(self.INSTANCE, self.NAME)
+        driver_format = image._get_driver_format()
+        self.assertEqual('raw', driver_format)
+        # 'raw' should be returned as 'raw'.
+        data.file_format = 'raw'
+        driver_format = image._get_driver_format()
+        self.assertEqual('raw', driver_format)
+
+    @mock.patch('nova.virt.image.model.LocalFileImage', autospec=True)
+    @mock.patch('nova.virt.disk.api.extend')
+    def test_resize_image_with_encryption(self, mock_extend, mock_image):
+        image = self.image_class(self.INSTANCE, self.NAME)
+        encryption = {'format': 'luks', 'secret': mock.sentinel.secret}
+        image.resize_image(mock.sentinel.new_size, encryption=encryption)
+        mock_image.assert_called_once_with(self.PATH, imgmodel.FORMAT_RAW)
+        mock_extend.assert_called_once_with(
+            mock_image.return_value, mock.sentinel.new_size,
+            encryption=encryption)
+
+    @mock.patch('nova.virt.images.convert_image')
+    def test_snapshot_extract_with_encryption(self, mock_convert):
+        image = self.image_class(self.INSTANCE, self.NAME)
+        src_encryption = {'format': 'luks', 'secret': mock.sentinel.secret}
+        dest_encryption = {
+            'format': 'luks', 'secret': mock.sentinel.dest_secret}
+        image.snapshot_extract(
+            mock.sentinel.target, 'luks', src_encryption=src_encryption,
+            dest_encryption=dest_encryption)
+        mock_convert.assert_called_once_with(
+            self.PATH, mock.sentinel.target, 'luks', 'luks',
+            src_encryption=src_encryption, dest_encryption=dest_encryption)
 
 
 class Qcow2TestCase(_ImageTestCase, test.NoDBTestCase):

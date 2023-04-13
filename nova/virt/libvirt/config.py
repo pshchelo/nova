@@ -1442,9 +1442,10 @@ class LibvirtConfigGuestDisk(LibvirtConfigGuestDevice):
 
                 self.target_bus = c.get('bus', None)
             elif c.tag == 'backingStore':
-                b = LibvirtConfigGuestDiskBackingStore()
-                b.parse_dom(c)
-                self.backing_store = b
+                if len(c):
+                    b = LibvirtConfigGuestDiskBackingStore()
+                    b.parse_dom(c)
+                    self.backing_store = b
             elif c.tag == 'readonly':
                 self.readonly = True
             elif c.tag == 'shareable':

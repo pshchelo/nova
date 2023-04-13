@@ -931,10 +931,11 @@ class API:
             # since libvirt interpreted the value differently than other
             # drivers. A value of 0 means don't check size.
             if dest_size != 0:
-                API._validate_image_ephemeral_encryption(
+                # There could be some overhead if there is ephemeral encryption
+                overhead = API._validate_image_ephemeral_encryption(
                     image_properties, image)
 
-                if image_size > dest_size:
+                if image_size > (dest_size + overhead):
                     raise exception.FlavorDiskSmallerThanImage(
                         flavor_size=dest_size, image_size=image_size)
 

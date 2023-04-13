@@ -62,6 +62,42 @@ def dmcrypt_delete_volume(target):
 
 
 @nova.privsep.sys_admin_pctxt.entrypoint
+def dmcrypt_open_volume(device, name, key, device_type='luks'):
+    """Open a device and set up a mapping
+
+    :param device: underlying block device
+    :param name: device mapper logical device name
+    :param key: passphrase for the encrypted volume
+    """
+    processutils.execute(
+        'cryptsetup', 'open', '--type', device_type,
+        device, name, '--key-file=-', process_input=key)
+
+
+@nova.privsep.sys_admin_pctxt.entrypoint
+def dmcrypt_close_volume(name):
+    """Close a device mapping
+
+    :param name: device mapper logical device name
+    """
+    try:
+        processutils.execute('cryptsetup', 'close', name)
+    except processutils.ProcessExecutionError as e:
+        # cryptsetup returns 4 when attempting to close a non-existent
+        # dm-crypt device. It indicates that the device is invalid, which
+        # means that the device is invalid (i.e., it has already been
+        # closed).
+        if e.exit_code == 4:
+            LOG.debug("Ignoring exit code 4, volume already closed")
+        else:
+            LOG.error("Could not close  encrypted volume "
+                      "%(volume)s. If dm-crypt device is still active "
+                      "it will have to be destroyed manually for "
+                      "cleanup to succeed.", {'volume': name})
+            raise
+
+
+@nova.privsep.sys_admin_pctxt.entrypoint
 def ploop_init(size, disk_format, fs_type, disk_path):
     """Initialize ploop disk, make it readable for non-root user
 

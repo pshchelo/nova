@@ -638,6 +638,8 @@ class Flat(Image):
     when creating a disk from a qcow2 if force_raw_images is not set in config.
     """
 
+    SUPPORTS_LUKS = True
+
     def __init__(
         self, instance=None, disk_name=None, path=None, disk_info_mapping=None
     ):
@@ -659,7 +661,17 @@ class Flat(Image):
     def _get_driver_format(self):
         try:
             data = images.qemu_img_info(self.path)
-            return data.file_format
+            # 'luks' is not a valid block driver format despite it being the
+            # disk image file format. For example, this XML raises an error:
+            #
+            # <disk type="file" device="disk">
+            #   <driver name="qemu" type="luks" cache="none"/>
+            #
+            # libvirt.libvirtError: unsupported configuration: unknown driver
+            # format value 'luks'
+            #
+            # Return format 'raw' in this case.
+            return data.file_format if data.file_format != 'luks' else 'raw'
         except exception.InvalidDiskInfo as e:
             LOG.info('Failed to get image info from path %(path)s; '
                      'error: %(error)s',
@@ -686,17 +698,40 @@ class Flat(Image):
         self, prepare_template, base, size, safe=False, *args, **kwargs):
         filename = self._get_lock_name(base)
 
+        # FIXME(lyarwood): Context is provided as a kwarg here thanks to
+        # the legacy ephemeral encryption implementation. It should likely
+        # be an arg but the required refactor isn't trivial.
+        context = kwargs.get('context')
+        # bdm_encryption contains the encryption attributes for the destination
+        # image, if encryption was specified.
+        bdm_encryption = self.get_encryption(context)
+        # image_encryption contains the encryption attributes for the source
+        # image, if it is encrypted.
+        image_encryption = kwargs.pop('src_encryption', None)
+
         @utils.synchronized(filename, external=True, lock_path=self.lock_path)
         def copy_raw_image(base, target, size):
-            libvirt_utils.copy_image(base, target)
+            if not (bdm_encryption or image_encryption):
+                libvirt_utils.copy_image(base, target)
+            else:
+                src_fmt = ('raw' if not image_encryption else
+                               image_encryption.get('format'))
+                dest_fmt = ('raw' if not bdm_encryption else
+                                bdm_encryption.get('format'))
+                images.convert_image(
+                    base, target, src_fmt, dest_fmt,
+                    src_encryption=image_encryption,
+                    dest_encryption=bdm_encryption)
             if size:
-                self.resize_image(size)
+                self.resize_image(size, encryption=bdm_encryption)
 
         generating = 'image_id' not in kwargs
         if generating:
             if not self.exists():
-                # Generating image in place
-                prepare_template(target=self.path, *args, **kwargs)
+                # Generating image in place (examples: ephemeral, swap)
+                prepare_template(
+                    target=self.path, src_encryption=image_encryption,
+                    dest_encryption=bdm_encryption, *args, **kwargs)
 
             # NOTE(plibeau): extend the disk in the case of image is not
             # accessible anymore by the customer and the base image is
@@ -704,7 +739,7 @@ class Flat(Image):
             # instance.
             else:
                 if size:
-                    self.resize_image(size)
+                    self.resize_image(size, encryption=bdm_encryption)
         else:
             if not os.path.exists(base):
                 prepare_template(target=base, *args, **kwargs)
@@ -721,11 +756,19 @@ class Flat(Image):
 
     def resize_image(self, size, encryption=None):
         image = imgmodel.LocalFileImage(self.path, self.driver_format)
-        disk.extend(image, size)
+        disk.extend(image, size, encryption=encryption)
 
     def snapshot_extract(self, target, out_format, src_encryption=None,
                          dest_encryption=None):
-        images.convert_image(self.path, target, self.driver_format, out_format)
+        src_fmt = self.driver_format
+        if src_encryption:
+            src_fmt = src_encryption.get('format')
+        dest_fmt = out_format
+        if dest_encryption:
+            dest_fmt = dest_encryption.get('format')
+        images.convert_image(
+            self.path, target, src_fmt, dest_fmt,
+            src_encryption=src_encryption, dest_encryption=dest_encryption)
 
     @staticmethod
     def is_file_in_instance_path():

@@ -153,11 +153,15 @@ class LibvirtUtilsTestCase(test.NoDBTestCase):
         encryption_opts = []
 
         if encryption:
+            prefix = 'encrypt.' if disk_format == 'qcow2' else ''
             encryption_opts = [
                 '--object', f"secret,id=sec,file={fh.name}",
-                '-o', 'encrypt.key-secret=sec',
-                '-o', f"encrypt.format={encryption.get('format')}",
+                '-o', f'{prefix}key-secret=sec',
             ]
+            if prefix:
+                encryption_opts += [
+                    '-o', f"{prefix}format={encryption.get('format')}",
+                ]
 
             encryption_details = {
                 'cipher-alg': 'aes-256',
@@ -170,7 +174,7 @@ class LibvirtUtilsTestCase(test.NoDBTestCase):
             for option, value in encryption_details.items():
                 encryption_opts += [
                     '-o',
-                    f'encrypt.{option}={value}',
+                    f'{prefix}{option}={value}',
                 ]
 
         expected_args = (
@@ -250,6 +254,17 @@ class LibvirtUtilsTestCase(test.NoDBTestCase):
         }
         self._test_create_image(
             '/some/stuff', 'qcow2', '1234567891234',
+            encryption=encryption,
+        )
+
+    def test_create_image_encryption_raw(self):
+        encryption = {
+            'secret': 'a_secret',
+            'format': 'luks',
+            'details': objects.EncryptDetails(),
+        }
+        self._test_create_image(
+            '/some/stuff', 'raw', '1234567891234',
             encryption=encryption,
         )
 

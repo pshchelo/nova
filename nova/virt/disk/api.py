@@ -151,10 +151,12 @@ def extend(image, size, encryption=None):
             # Need the secret for the resize. When --image-opts is used, the
             # source filename must be passed as part of the option string
             # instead of as a positional arg.
+            prefix = (
+                'encrypt.' if image.format == imgmodel.FORMAT_QCOW2 else '')
             encryption_opts = (
                 '--object', f"secret,id=sec,file={f.name}",
                 '--image-opts',
-                f"encrypt.key-secret=sec,file.filename={image.path}",
+                f"{prefix}key-secret=sec,file.filename={image.path}",
             )
             cmd += encryption_opts + (size,)
             processutils.execute(*cmd)

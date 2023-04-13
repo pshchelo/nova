@@ -421,7 +421,7 @@ def get_injection_info(network_info=None, admin_pass=None, files=None):
         network_info=network_info, admin_pass=admin_pass, files=files)
 
 
-def _concurrency(signal, wait, done, target, is_block_dev=False):
+def _concurrency(signal, wait, done, target, is_block_dev=False, **kwargs):
     signal.set()
     wait.wait()
     done.set()
@@ -958,11 +958,11 @@ class LibvirtConnTestCase(test.NoDBTestCase,
     def test_driver_capabilities_flat(self):
         self.flags(use_cow_images=False)
         drvr = libvirt_driver.LibvirtDriver(fake.FakeVirtAPI(), False)
-        self.assertFalse(
+        self.assertTrue(
             drvr.capabilities['supports_ephemeral_encryption'],
             "Driver capabilities for 'supports_ephemeral_encryption' "
             "is invalid")
-        self.assertFalse(
+        self.assertTrue(
             drvr.capabilities['supports_ephemeral_encryption_luks'],
             "Driver capabilities for 'supports_ephemeral_encryption_luks' "
             "is invalid",
@@ -16172,14 +16172,14 @@ class LibvirtConnTestCase(test.NoDBTestCase,
                 mock.call(context=self.context,
                           target=backfile_path,
                           image_id=self.test_instance['image_ref'],
-                          trusted_certs=None,
-                          src_encryption=None),
+                          trusted_certs=None),
                 mock.call(self.context, kernel_path, instance.kernel_id,
                           None),
                 mock.call(self.context, ramdisk_path, instance.ramdisk_id,
                           None)
             ])
-            resize_image_mock.assert_called_once_with(virt_disk_size)
+            resize_image_mock.assert_called_once_with(
+                virt_disk_size, encryption=None)
 
     @mock.patch('nova.virt.libvirt.utils.create_image',
                 new=mock.NonCallableMock())
