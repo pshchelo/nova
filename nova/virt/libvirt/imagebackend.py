@@ -83,6 +83,12 @@ def _update_utime_ignore_eacces(path):
                 ctxt.reraise = False
 
 
+class EncryptionInfo(ty.TypedDict):
+    secret: str
+    format: str
+    details: encrypt_details.EncryptDetails
+
+
 class Image(metaclass=abc.ABCMeta):
 
     SUPPORTS_CLONE = False
@@ -194,63 +200,12 @@ class Image(metaclass=abc.ABCMeta):
         info.source_path = self.path
         info.boot_order = boot_order
 
-        if (self.SUPPORTS_LUKS and
-            self.disk_info_mapping and
-            self.disk_info_mapping.get('encrypted') and
-            self.disk_info_mapping.get('encryption_format') == 'luks'
-        ):
-            encryption = vconfig.LibvirtConfigGuestDiskEncryption()
-            secret = vconfig.LibvirtConfigGuestDiskEncryptionSecret()
-            secret.type = 'passphrase'
-            secret.uuid = self.disk_info_mapping.get('encryption_secret_uuid')
-            encryption.secret = secret
-            encryption.format = self.disk_info_mapping.get('encryption_format')
-            info.ephemeral_encryption = encryption
-
-            # Config for encrypted backing file, if applicable.
-            backing_secret_uuid = (
-                self.disk_info_mapping.get('backing_encryption_secret_uuid'))
-            if backing_secret_uuid:
-                bstore = vconfig.LibvirtConfigGuestDiskBackingStore()
-                bstore.source_type = 'file'
-                # Backing file will be JSON if it's encrypted (the encryption
-                # secret has to be provided in JSON form).
-                backing_file = libvirt_utils.get_disk_backing_file(
-                    self.path, basename=False)
-                if backing_file.startswith('json:'):
-                    json_str = backing_file[5:]
-                    bstore.source_file = jsonutils.loads(
-                        json_str)['file']['filename']
-                else:
-                    bstore.source_file = backing_file
-                # The backing file format could be raw or qcow2 depending on
-                # CONF.compute.force_raw_images.
-                # 'luks' is not a valid storage source format:
-                #       libvirt.libvirtError: XML error: unknown storage source
-                #       format 'luks'
-                # We can't use self.driver_format here because it won't
-                # necessarily match the file format of the backing file.
-                # Example: self.driver_format = 'qcow2' but backing file format
-                # is 'raw'.
-                b_file_format = images.qemu_img_info(
-                    bstore.source_file).file_format
-                bstore.format = (
-                    b_file_format if b_file_format != 'luks' else 'raw')
-                backing_encryption = vconfig.LibvirtConfigGuestDiskEncryption()
-                backing_secret = (
-                    vconfig.LibvirtConfigGuestDiskEncryptionSecret())
-                backing_secret.type = 'passphrase'
-                backing_secret.uuid = backing_secret_uuid
-                backing_encryption.secret = backing_secret
-                backing_encryption.format = self.disk_info_mapping.get(
-                    'encryption_format')
-                bstore.ephemeral_encryption = backing_encryption
-                info.backing_store = bstore
-
         if disk_bus == 'scsi':
             self.disk_scsi(info, disk_unit)
 
         self.disk_qos(info, extra_specs)
+
+        self.disk_encryption(info)
 
         return info
 
@@ -280,6 +235,20 @@ class Image(metaclass=abc.ABCMeta):
             if len(scope) > 1 and scope[0] == 'quota':
                 if scope[1] in tune_items:
                     setattr(info, scope[1], value)
+
+    def disk_encryption(self, info):
+        if (self.SUPPORTS_LUKS and
+            self.disk_info_mapping and
+            self.disk_info_mapping.get('encrypted') and
+            self.disk_info_mapping.get('encryption_format') == 'luks'
+        ):
+            encryption = vconfig.LibvirtConfigGuestDiskEncryption()
+            secret = vconfig.LibvirtConfigGuestDiskEncryptionSecret()
+            secret.type = 'passphrase'
+            secret.uuid = self.disk_info_mapping.get('encryption_secret_uuid')
+            encryption.secrets.append(secret)
+            encryption.format = self.disk_info_mapping.get('encryption_format')
+            info.ephemeral_encryption = encryption
 
     def libvirt_fs_info(self, target, driver_type=None):
         """Get `LibvirtConfigGuestFilesys` filled for this image.
@@ -510,7 +479,7 @@ class Image(metaclass=abc.ABCMeta):
         raise exception.ImageUnacceptable(image_id=image_id_or_uri,
                                           reason=reason)
 
-    def flatten(self):
+    def flatten(self, encryption=None):
         """Flatten an image.
 
         The implementation of this method is optional and therefore is
@@ -519,7 +488,8 @@ class Image(metaclass=abc.ABCMeta):
         raise NotImplementedError('flatten() is not implemented')
 
     def direct_snapshot(self, context, snapshot_name, image_format, image_id,
-                        base_image_id):
+                        base_image_id, src_encryption=None,
+                        dest_encryption=None):
         """Prepare a snapshot for direct reference from glance.
 
         The implementation of this method is optional and therefore is
@@ -616,6 +586,13 @@ class Image(metaclass=abc.ABCMeta):
                 'secret': secret,
                 'details': self.disk_info_mapping.get('encryption_details'),
             }
+            if isinstance(self, (Qcow2, Rbd)):
+                backing_secret_uuid = self.disk_info_mapping.get(
+                    'backing_encryption_secret_uuid')
+                if backing_secret_uuid:
+                    backing_secret = crypto.get_encryption_secret(
+                        context, backing_secret_uuid)
+                    encryption['backing_secret'] = backing_secret
             return encryption
 
     @staticmethod
@@ -760,12 +737,10 @@ class Flat(Image):
 
     def snapshot_extract(self, target, out_format, src_encryption=None,
                          dest_encryption=None):
-        src_fmt = self.driver_format
-        if src_encryption:
-            src_fmt = src_encryption.get('format')
-        dest_fmt = out_format
-        if dest_encryption:
-            dest_fmt = dest_encryption.get('format')
+        src_fmt = (self.driver_format if not src_encryption else
+                        src_encryption.get('format'))
+        dest_fmt = (out_format if not dest_encryption else
+                        dest_encryption.get('format'))
         images.convert_image(
             self.path, target, src_fmt, dest_fmt,
             src_encryption=src_encryption, dest_encryption=dest_encryption)
@@ -800,29 +775,47 @@ class Qcow2(Image):
         self.disk_info_path = os.path.join(os.path.dirname(path), 'disk.info')
         self.resolve_driver_format()
 
-    def get_encryption(
-        self,
-        context: 'nova.context.RequestContext',
-    ) -> ty.Optional[ty.Dict[str, ty.Any]]:
-        """Get encryption attributes from the disk_info_mapping.
-
-        Checks for encryption attributes in the disk_info_mapping and returns
-        them if present. If the disk_info_mapping is not present, if the image
-        is not encrypted, or if the image backend does not support encryption,
-        this method will return None.
-
-        :returns: A dict detailing the various encryption attributes such as
-            the format and passphrase or None
-        """
-        encryption = super().get_encryption(context)
-        if encryption:
-            backing_secret_uuid = self.disk_info_mapping.get(
-                'backing_encryption_secret_uuid')
-            if backing_secret_uuid:
-                backing_secret = crypto.get_encryption_secret(
-                    context, backing_secret_uuid)
-                encryption['backing_secret'] = backing_secret
-            return encryption
+    def disk_encryption(self, info):
+        super().disk_encryption(info)
+        # Config for encrypted backing file, if applicable.
+        backing_secret_uuid = (
+            self.disk_info_mapping.get('backing_encryption_secret_uuid'))
+        if backing_secret_uuid:
+            bstore = vconfig.LibvirtConfigGuestDiskBackingStore()
+            bstore.source_type = 'file'
+            # Backing file will be JSON if it's encrypted (the encryption
+            # secret has to be provided in JSON form).
+            backing_file = libvirt_utils.get_disk_backing_file(
+                self.path, basename=False)
+            if backing_file.startswith('json:'):
+                json_str = backing_file[5:]
+                bstore.source_file = jsonutils.loads(
+                    json_str)['file']['filename']
+            else:
+                bstore.source_file = backing_file
+            # The backing file format could be raw or qcow2 depending on
+            # CONF.compute.force_raw_images.
+            # 'luks' is not a valid storage source format:
+            #       libvirt.libvirtError: XML error: unknown storage source
+            #       format 'luks'
+            # We can't use self.driver_format here because it won't
+            # necessarily match the file format of the backing file.
+            # Example: self.driver_format = 'qcow2' but backing file format
+            # is 'raw'.
+            b_file_format = images.qemu_img_info(
+                bstore.source_file).file_format
+            bstore.format = (
+                b_file_format if b_file_format != 'luks' else 'raw')
+            backing_encryption = vconfig.LibvirtConfigGuestDiskEncryption()
+            backing_secret = (
+                vconfig.LibvirtConfigGuestDiskEncryptionSecret())
+            backing_secret.type = 'passphrase'
+            backing_secret.uuid = backing_secret_uuid
+            backing_encryption.secrets.append(backing_secret)
+            backing_encryption.format = self.disk_info_mapping.get(
+                'encryption_format')
+            bstore.ephemeral_encryption = backing_encryption
+            info.backing_store = bstore
 
     def create_image(
         self, prepare_template, base, size, safe=False, *args, **kwargs
@@ -1085,6 +1078,9 @@ class Lvm(Image):
 class Rbd(Image):
 
     SUPPORTS_CLONE = True
+    SUPPORTS_LUKS = True
+
+    SNAPNAME_FOR_ENCRYPTION = 'snap_for_encryption'
 
     def __init__(
         self, instance=None, disk_name=None, path=None, disk_info_mapping=None
@@ -1157,7 +1153,23 @@ class Rbd(Image):
 
         self.disk_qos(info, extra_specs)
 
+        self.disk_encryption(info)
+
         return info
+
+    def disk_encryption(self, info):
+        super().disk_encryption(info)
+        # https://libvirt.org/formatstorageencryption.html
+        if info.ephemeral_encryption:
+            info.ephemeral_encryption.engine = 'librbd'
+            backing_secret_uuid = self.disk_info_mapping.get(
+                'backing_encryption_secret_uuid')
+            if backing_secret_uuid and self.driver.supports_layered_encryption:
+                backing_secret = (
+                        vconfig.LibvirtConfigGuestDiskEncryptionSecret())
+                backing_secret.type = 'passphrase'
+                backing_secret.uuid = backing_secret_uuid
+                info.ephemeral_encryption.secrets.append(backing_secret)
 
     def _can_fallocate(self):
         return False
@@ -1198,21 +1210,91 @@ class Rbd(Image):
             self._remove_non_raw_cache_image(base)
             prepare_template(target=base, *args, **kwargs)
 
+        # FIXME(lyarwood): Context is provided as a kwarg here thanks to the
+        # legacy ephemeral encryption implementation. It should likely be an
+        # arg but the required refactor isn't trivial.
+        context = kwargs.get('context')
+        # bdm_encryption contains the encryption attributes for the destination
+        # image, if encryption was specified.
+        bdm_encryption = self.get_encryption(context)
+        # image_encryption contains the encryption attributes for the source
+        # image, if it is encrypted.
+        image_encryption = kwargs.pop('src_encryption', None)
+
         # prepare_template() may have cloned the image into a new rbd
         # image already instead of downloading it locally
         if not self.exists():
-            self.driver.import_image(base, self.rbd_name)
-        self.verify_base_size(base, size)
+            if not bdm_encryption and not image_encryption:
+                self.driver.import_image(base, self.rbd_name)
+            elif bdm_encryption:
+                base_image_size = disk.get_disk_size(base)
+                create_image_size = base_image_size
+                if not image_encryption:
+                    # The size is temporarily created larger if the source
+                    # image is not encrypted in order to accommodate the
+                    # LUKS header in the target image.
+                    # "The LUKS header size can vary (up to 136MiB in LUKS2),
+                    # but is usually up to 16MiB, depending on the version of
+                    # libcryptsetup installed."
+                    # https://docs.ceph.com/en/latest/rbd/rbd-encryption/#luks
+                    create_image_size = base_image_size + 256 * units.Mi
+                # Create the target image in RBD and format it for encryption.
+                self.driver.create(self.rbd_name, create_image_size)
+                self.driver.format_encryption(self.rbd_name, bdm_encryption)
+                # Resize the target image back down to the base image size
+                # after formatting.
+                self.resize_image(base_image_size, encryption=bdm_encryption)
+
+                filename = self._get_lock_name(base)
+
+                @utils.synchronized(
+                    filename, external=True, lock_path=self.lock_path)
+                def copy_into_rbd_image():
+                    LOG.debug(
+                        f'copying data from {base} to '
+                        f'{self.driver.pool}/{self.rbd_name}')
+                    src_fmt = ('raw' if not image_encryption else
+                                    image_encryption.get('format'))
+                    dest_fmt = ('raw' if not bdm_encryption else
+                                    bdm_encryption.get('format'))
+                    images.convert_image(
+                        base, self.path, src_fmt, dest_fmt,
+                        src_encryption=image_encryption,
+                        dest_encryption=bdm_encryption,
+                        skip_image_creation=True)
+
+                # Copy the base image data directly into the precreated target
+                # image.
+                copy_into_rbd_image()
+
+        verify_size = size
+        if size and bdm_encryption:
+            # If the disk is encrypted, allow for some overhead from the LUKS
+            # header.
+            # "The LUKS header size can vary (up to 136MiB in LUKS2), but is
+            # usually up to 16MiB, depending on the version of libcryptsetup
+            # installed."
+            # https://docs.ceph.com/en/latest/rbd/rbd-encryption/#luks
+            verify_size = size + 256 * units.Mi
+        self.verify_base_size(base, verify_size)
 
         if size and size > self.get_disk_size(self.rbd_name):
-            self.driver.resize(self.rbd_name, size)
+            self.resize_image(size, encryption=bdm_encryption)
 
     def resize_image(self, size, encryption=None):
-        self.driver.resize(self.rbd_name, size)
+        self.driver.resize(self.rbd_name, size, encryption=encryption)
 
     def snapshot_extract(self, target, out_format, src_encryption=None,
                          dest_encryption=None):
-        images.convert_image(self.path, target, 'raw', out_format)
+        """Standard snapshot not using clone."""
+        src_fmt = ('raw' if not src_encryption else
+                        src_encryption.get('format'))
+        dest_fmt = (out_format if not dest_encryption else
+                        dest_encryption.get('format'))
+        images.convert_image(
+            self.path, target, src_fmt, dest_fmt,
+            src_encryption=src_encryption,
+            dest_encryption=dest_encryption)
 
     @staticmethod
     def is_shared_block_storage():
@@ -1288,6 +1370,69 @@ class Rbd(Image):
                  {'image': image_id,
                   'store': store_name})
 
+    def _get_location_url_and_size_for_encryption(
+        self, fsid: str, pool: str, image: str,
+    ) -> (str, int):
+        image_size = None
+
+        if not self.driver.exists(
+                image, pool=pool, snapshot=self.SNAPNAME_FOR_ENCRYPTION):
+
+            filename = self._get_lock_name(image)
+
+            @utils.synchronized(
+                    filename, external=True, lock_path=self.lock_path)
+            def temporarily_resize_and_snapshot():
+                LOG.info(
+                    f'Temporarily resizing source image {pool}/{image} larger '
+                    'in order to make a snapshot for encryption')
+                image_size = self.driver.size(image, pool=pool)
+                # Resize the source image first to ensure the child image has
+                # enough space to accommodate the LUKS header.
+                # "The LUKS header size can vary (up to 136MiB in LUKS2), but
+                # is usually up to 16MiB, depending on the version of
+                # libcryptsetup installed."
+                # https://docs.ceph.com/en/latest/rbd/rbd-encryption/#luks
+                self.driver.resize(
+                    image, image_size + 136 * units.Mi, pool=pool)
+                # Create a snapshot of the temporarily enlarged image (to also
+                # be reused for future encrypted clones).
+                LOG.info(
+                    f'Creating snapshot {self.SNAPNAME_FOR_ENCRYPTION} of '
+                    f'image {pool}/{image} for encryption')
+                self.driver.create_snap(
+                    image, self.SNAPNAME_FOR_ENCRYPTION, pool=pool,
+                    protect=True)
+                # Resize the source image back to its original size.
+                LOG.info(
+                    f'Resizing image {pool}/{image} back to its original size '
+                    f'of {image_size}')
+                self.driver.resize(image, image_size, pool=pool)
+
+            temporarily_resize_and_snapshot()
+
+        url = f'rbd://{fsid}/{pool}/{image}/{self.SNAPNAME_FOR_ENCRYPTION}'
+
+        return url, image_size
+
+    def _format_and_resize_for_encryption(
+        self,
+        src_encryption: EncryptionInfo,
+        dest_encryption: EncryptionInfo,
+        image: str,
+        image_size: ty.Optional[int],
+        image_pool: str,
+    ) -> None:
+        if dest_encryption and self.driver.supports_layered_encryption:
+            # If RBD layered encryption is supported, format the clone.
+            self.driver.format_encryption(self.rbd_name, dest_encryption)
+
+        if dest_encryption and not src_encryption:
+            # Resize the clone back to the original size of the source image.
+            if image_size is None:
+                image_size = self.driver.size(image, pool=image_pool)
+            self.resize_image(image_size, encryption=dest_encryption)
+
     def clone(self, context, image_id_or_uri, copy_to_store=True):
         image_meta = IMAGE_API.get(context, image_id_or_uri,
                                    include_locations=True)
@@ -1300,10 +1445,37 @@ class Rbd(Image):
             raise exception.ImageUnacceptable(image_id=image_id_or_uri,
                                               reason=reason)
 
+        bdm_encryption = self.get_encryption(context)
+        image_encryption = image_meta.get(
+            'properties', {}).get('os_encrypt_key_id')
+        if (bdm_encryption and not image_encryption and
+                not self.driver.supports_layered_encryption):
+            error = _('Clones of images cannot be formatted for encryption.')
+            raise exception.RBDLayeredEncryptionNotSupported(error=error)
+
         for location in locations:
             if self.driver.is_cloneable(location, image_meta):
+                fsid, pool, image, _snapshot = self.driver.parse_url(
+                        location['url'])
+
+                image_size = None
+                if bdm_encryption and not image_encryption:
+                    # We only need to do the temporary resize larger + snapshot
+                    # if the source image is not encrypted. If the source image
+                    # is encrypted, it already contains the LUKS header
+                    # overhead.
+                    url, image_size = (
+                        self._get_location_url_and_size_for_encryption(
+                            fsid, pool, image))
+                    location = {'url': url}
+
                 LOG.debug('Selected location: %(loc)s', {'loc': location})
-                return self.driver.clone(location, self.rbd_name)
+                result = self.driver.clone(location, self.rbd_name)
+
+                self._format_and_resize_for_encryption(
+                    image_encryption, bdm_encryption, image, image_size, pool)
+
+                return result
 
         # Not clone-able in our ceph, so try to get glance to copy it for us
         # and then retry
@@ -1315,7 +1487,7 @@ class Rbd(Image):
         raise exception.ImageUnacceptable(image_id=image_id_or_uri,
                                           reason=reason)
 
-    def flatten(self):
+    def flatten(self, encryption=None):
         # NOTE(vdrok): only flatten images if they are not already flattened,
         # meaning that parent info is present
         try:
@@ -1326,7 +1498,10 @@ class Rbd(Image):
                 "consider it already flat", {
                     'img': self.rbd_name, 'pool': self.driver.pool})
         else:
-            self.driver.flatten(self.rbd_name, pool=self.driver.pool)
+            # self.driver.flatten(self.rbd_name, pool=self.driver.pool,
+            #                    src_encryption=encryption)
+            self.driver.flatten(self.rbd_name, pool=self.driver.pool,
+                                dest_encryption=encryption)
 
     def get_model(self, connection):
         secret = None
@@ -1402,7 +1577,8 @@ class Rbd(Image):
         return parent_pool
 
     def direct_snapshot(self, context, snapshot_name, image_format,
-                        image_id, base_image_id):
+                        image_id, base_image_id, src_encryption=None,
+                        dest_encryption=None):
         """Creates an RBD snapshot directly.
         """
         fsid = self.driver.get_fsid()
@@ -1422,8 +1598,13 @@ class Rbd(Image):
                                 snap=snapshot_name)}
         try:
             self.driver.clone(location, image_id, dest_pool=parent_pool)
+            if dest_encryption and self.driver.supports_layered_encryption:
+                self.driver.format_encryption(image_id, dest_encryption,
+                                              pool=parent_pool)
             # Flatten the image, which detaches it from the source snapshot
-            self.driver.flatten(image_id, pool=parent_pool)
+            self.driver.flatten(
+                image_id, pool=parent_pool, src_encryption=src_encryption,
+                dest_encryption=dest_encryption)
         finally:
             # all done with the source snapshot, clean it up
             self.cleanup_direct_snapshot(location)

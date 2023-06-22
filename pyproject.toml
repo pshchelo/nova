@@ -148,6 +148,7 @@ files = [
     "nova/scheduler/client/report.py",
     "nova/scheduler/request_filter.py",
     "nova/scheduler/utils.py",
+    "nova/storage/rbd_utils.py",
     "nova/utils.py",
     "nova/virt/driver.py",
     "nova/virt/hardware.py",

@@ -264,12 +264,11 @@ class LibvirtImageBackendFixture(fixtures.Fixture):
         if mock_disk.disk_info_mapping.get('encrypted'):
             info.ephemeral_encryption = (
                 config.LibvirtConfigGuestDiskEncryption())
-            info.ephemeral_encryption.secret = (
-                config.LibvirtConfigGuestDiskEncryptionSecret())
-            info.ephemeral_encryption.secret.type = 'passphrase'
-            info.ephemeral_encryption.secret.uuid = (
-                mock_disk.disk_info_mapping['encryption_secret_uuid'])
             info.ephemeral_encryption.format = (
                 mock_disk.disk_info_mapping['encryption_format'])
+            secret = config.LibvirtConfigGuestDiskEncryptionSecret()
+            secret.type = 'passphrase'
+            secret.uuid = mock_disk.disk_info_mapping['encryption_secret_uuid']
+            info.ephemeral_encryption.secrets.append(secret)
 
         return info

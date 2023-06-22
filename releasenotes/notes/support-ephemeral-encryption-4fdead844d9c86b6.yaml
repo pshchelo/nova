@@ -1,8 +1,8 @@
 features:
   - |
-    The libvirt driver with the qcow2 and raw image backends now support LUKS
-    encryption of ephemeral/local disks including root, ephemeral, and swap
-    disks.
+    The libvirt driver with the qcow2, raw, and rbd image backends now support
+    LUKS encryption of ephemeral/local disks including root, ephemeral, and
+    swap disks.
 
     The following server actions are currently supported:
 

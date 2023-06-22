@@ -866,6 +866,7 @@ class LibvirtConnTestCase(_VirtDriverTestCase, test.TestCase):
                       lambda *a, **k: None)
         self.stub_out('nova.privsep.path.chown', lambda *a, **k: None)
 
+    @mock.patch("nova.storage.rbd_utils.RBDDriver", new=mock.Mock())
     def test_init_host_image_type_rbd_force_raw_images_true(self):
         CONF.set_override('images_type', 'rbd', group='libvirt')
         CONF.set_override('force_raw_images', True)

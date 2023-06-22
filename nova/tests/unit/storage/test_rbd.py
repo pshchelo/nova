@@ -631,6 +631,8 @@ class RbdTestCase(test.NoDBTestCase):
         self.assertRaises(exception.ImageUnacceptable,
                           self.driver.parent_info, self.volume_name)
 
+    @mock.patch.object(rbd_utils.RBDDriver, 'supports_layered_encryption',
+                       new=mock.Mock(return_value=True))
     @mock.patch.object(rbd_utils, 'RBDVolumeProxy')
     def test_flatten(self, mock_proxy):
         proxy = mock_proxy.return_value

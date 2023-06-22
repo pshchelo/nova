@@ -68,7 +68,7 @@ def privileged_qemu_img_info(path, format=None, output_format='json'):
 
 def convert_image(source, dest, in_format, out_format, run_as_root=False,
                   compress=False, src_encryption=None, dest_encryption=None,
-                  backing_file_format=None):
+                  backing_file_format=None, skip_image_creation=False):
     """Convert image to other format."""
     if in_format is None:
         raise RuntimeError("convert_image without input format is a security"
@@ -76,7 +76,8 @@ def convert_image(source, dest, in_format, out_format, run_as_root=False,
     _convert_image(source, dest, in_format, out_format, run_as_root,
                    compress=compress, src_encryption=src_encryption,
                    dest_encryption=dest_encryption,
-                   backing_file_format=backing_file_format)
+                   backing_file_format=backing_file_format,
+                   skip_image_creation=skip_image_creation)
 
 
 def convert_image_unsafe(source, dest, out_format, run_as_root=False):
@@ -94,7 +95,7 @@ def convert_image_unsafe(source, dest, out_format, run_as_root=False):
 
 def _convert_image(source, dest, in_format, out_format, run_as_root,
                    compress=False, src_encryption=None, dest_encryption=None,
-                   backing_file_format=None):
+                   backing_file_format=None, skip_image_creation=False):
     try:
         with compute_utils.disk_ops_semaphore:
             if not run_as_root:
@@ -102,13 +103,15 @@ def _convert_image(source, dest, in_format, out_format, run_as_root,
                     source, dest, in_format, out_format, CONF.instances_path,
                     compress, src_encryption=src_encryption,
                     dest_encryption=dest_encryption,
-                    backing_file_format=backing_file_format)
+                    backing_file_format=backing_file_format,
+                    skip_image_creation=skip_image_creation)
             else:
                 nova.privsep.qemu.convert_image(
                     source, dest, in_format, out_format, CONF.instances_path,
                     compress, src_encryption=src_encryption,
                     dest_encryption=dest_encryption,
-                    backing_file_format=backing_file_format)
+                    backing_file_format=backing_file_format,
+                    skip_image_creation=skip_image_creation)
 
     except processutils.ProcessExecutionError as exp:
         msg = (_("Unable to convert image to %(format)s: %(exp)s") %

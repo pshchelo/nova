@@ -380,7 +380,7 @@ def _update_volume_xml(xml_doc, migrate_data, instance, get_volume_config):
             secret = vconfig.LibvirtConfigGuestDiskEncryptionSecret()
             secret.type = 'passphrase'
             secret.uuid = bdm_info.encryption_secret_uuid
-            conf.volume_encryption.secret = secret
+            conf.volume_encryption.secrets.append(secret)
 
         xml_doc2 = etree.XML(conf.to_xml(), parser)
         serial_dest = xml_doc2.findtext('serial')

@@ -23450,7 +23450,8 @@ class LibvirtConnTestCase(test.NoDBTestCase,
         drvr.image_backend = mock.Mock()
         mock_rbd_image = mock.Mock()
         mock_flat_image = mock.Mock()
-        mock_flat_image.libvirt_info.return_value = mock.sentinel.diskconfig
+        mock_diskconfig = mock.Mock(ephemeral_encryption=None)
+        mock_flat_image.libvirt_info.return_value = mock_diskconfig
         drvr.image_backend.by_name.side_effect = [mock_rbd_image,
                                                   mock_flat_image]
         mock_rbd_image.exists.return_value = False
@@ -23470,7 +23471,7 @@ class LibvirtConnTestCase(test.NoDBTestCase,
         call2 = mock.call(instance, 'disk.config', 'flat',
                 disk_info_mapping=disk_mapping['disk.config'])
         drvr.image_backend.by_name.assert_has_calls([call1, call2])
-        self.assertEqual(mock.sentinel.diskconfig, diskconfig)
+        self.assertEqual(mock_diskconfig, diskconfig)
 
     def _test_suspend_guest_for_snapshot(self, live_snapshot, state):
         drvr = libvirt_driver.LibvirtDriver(fake.FakeVirtAPI(), False)
@@ -26376,7 +26377,8 @@ class LibvirtDriverTestCase(test.NoDBTestCase, TraitsComparisonMixin):
             src_encryption=None)
         mock_rbd_imagebackend.flatten.assert_called_once()
         mock_rbd_driver.flatten.assert_called_once_with(
-            mock.sentinel.rbd_name, pool=mock.sentinel.rbd_pool)
+            mock.sentinel.rbd_name, pool=mock.sentinel.rbd_pool,
+            dest_encryption=None)
 
     @mock.patch('nova.virt.libvirt.driver.LOG.debug')
     def test_rbd_image_flatten_during_fetch_image_cache(self, mock_debug):
@@ -32275,7 +32277,9 @@ class LibvirtSnapshotTests(_BaseSnapshotTests):
         rbd.parse_url = mock.Mock(return_value=['a', 'b', 'c', 'd'])
         self._test_snapshot(disk_format='raw')
         rbd.clone.assert_called_with(mock.ANY, mock.ANY, dest_pool='test-pool')
-        rbd.flatten.assert_called_with(mock.ANY, pool='test-pool')
+        rbd.flatten.assert_called_with(
+            mock.ANY, pool='test-pool', src_encryption=None,
+            dest_encryption=None)
 
     @mock.patch('nova.virt.libvirt.utils.get_disk_type_from_path',
                 new=mock.Mock(return_value='rbd'))
@@ -32335,7 +32339,9 @@ class LibvirtSnapshotTests(_BaseSnapshotTests):
             self.assertRaises(test.TestingException, self._test_snapshot,
                               disk_format='raw')
         rbd.clone.assert_called_with(mock.ANY, mock.ANY, dest_pool='test-pool')
-        rbd.flatten.assert_called_with(mock.ANY, pool='test-pool')
+        rbd.flatten.assert_called_with(
+            mock.ANY, pool='test-pool', src_encryption=None,
+            dest_encryption=None)
         # Ensure that the direct_snapshot attempt was cleaned up
         rbd.remove_snap.assert_called_with('c', 'd', ignore_errors=True,
                                            pool='b', force=True)
@@ -32360,7 +32366,9 @@ class LibvirtSnapshotTests(_BaseSnapshotTests):
             self.assertRaises(exception.ImageNotFound, self._test_snapshot,
                               disk_format='raw')
         rbd.clone.assert_called_with(mock.ANY, mock.ANY, dest_pool='test-pool')
-        rbd.flatten.assert_called_with(mock.ANY, pool='test-pool')
+        rbd.flatten.assert_called_with(
+            mock.ANY, pool='test-pool', src_encryption=None,
+            dest_encryption=None)
         # Ensure that the direct_snapshot attempt was cleaned up
         rbd.remove_snap.assert_called_with('c', 'd', ignore_errors=True,
                                            pool='b', force=True)
@@ -32370,6 +32378,8 @@ class LibvirtSnapshotTests(_BaseSnapshotTests):
         mock_log.warning.assert_called_once_with(
             'Failed to snapshot image because it was deleted')
 
+    @mock.patch('nova.virt.libvirt.imagebackend.Image.get_encryption',
+                new=mock.Mock(return_value=None))
     @mock.patch('nova.objects.BlockDeviceMappingList.get_by_instance_uuid',
                 new=mock.MagicMock())
     @mock.patch('nova.virt.libvirt.blockinfo.get_disk_info',
@@ -32407,15 +32417,13 @@ class LibvirtSnapshotTests(_BaseSnapshotTests):
     @mock.patch('nova.virt.libvirt.blockinfo.get_disk_info',
                 new=mock.MagicMock())
     @mock.patch.object(key_manager, 'API', new=mock.Mock())
-    @mock.patch('nova.virt.libvirt.imagebackend.Image.get_encryption',
-                new=mock.Mock(return_value=None))
+    @mock.patch('nova.virt.libvirt.imagebackend.Image.get_encryption')
     @mock.patch('nova.virt.libvirt.utils.get_disk_type_from_path',
                 new=mock.Mock(return_value='rbd'))
     @mock.patch.object(libvirt_driver.imagebackend.images, 'convert_image',
                        new=mock.Mock(side_effect=[io.BytesIO(b''),
                                                   io.BytesIO(b'')]))
-    @mock.patch('nova.virt.libvirt.utils.file_open',
-                new=mock.Mock(return_value=io.BytesIO(b'')))
+    @mock.patch('nova.virt.libvirt.utils.file_open')
     @mock.patch('nova.virt.libvirt.utils.find_disk',
                 return_value=('filename', 'rbd'))
     @mock.patch('nova.virt.libvirt.imagebackend.Rbd.resolve_driver_format')
@@ -32425,11 +32433,16 @@ class LibvirtSnapshotTests(_BaseSnapshotTests):
     @mock.patch.object(rbd_utils, 'rbd')
     def test_raw_with_rbd_clone_failure_does_cold_snapshot(
             self, mock_rbd, mock_driver, mock_get_guest, mock_version,
-            mock_resolve, mock_find_disk):
+            mock_resolve, mock_find_disk, mock_open, mock_encryption,
+            encryption=None):
         self.flags(images_type='rbd', group='libvirt')
+        mock_open.return_value.__enter__.return_value = io.BytesIO(b'')
         rbd = mock_driver.return_value
-        rbd.parent_info = mock.Mock(side_effect=exception.ImageUnacceptable(
-            image_id='fake_id', reason='rbd testing'))
+        mock_encryption.return_value = encryption
+        if encryption is None:
+            rbd.parent_info = mock.Mock(
+                side_effect=exception.ImageUnacceptable(
+                    image_id='fake_id', reason='rbd testing'))
         mock_find_disk.return_value = ('rbd://some/fake/rbd/image', 'raw')
         mock_guest = mock.Mock(spec=libvirt_guest.Guest)
         mock_guest.get_power_state.return_value = power_state.RUNNING
@@ -32501,7 +32514,8 @@ class LXCSnapshotTests(LibvirtSnapshotTests):
         super(LXCSnapshotTests, self).setUp()
         self.flags(virt_type='lxc', group='libvirt')
 
-    def test_raw_with_rbd_clone_failure_does_cold_snapshot(self):
+    def test_raw_with_rbd_clone_failure_does_cold_snapshot(
+            self, encryption=None):
         self.skipTest("managedSave is not supported with LXC")
 
 
@@ -33265,7 +33279,8 @@ class EphemeralEncryptionTestCase(test.NoDBTestCase):
         driver_bdm = block_device_info['image'][0]
         self.assertEqual(expected_format, driver_bdm['encryption_format'])
         self.assertEqual(uuids.secret1, driver_bdm['encryption_secret_uuid'])
-        keymgr_call1 = mock.call(self.context, self.instance, driver_bdm)
+        keymgr_call1 = mock.call(
+            self.context, self.instance, driver_bdm, secret=None)
         libvirt_call1 = mock.call(
             'volume', f"{self.instance.uuid}_{driver_bdm['uuid']}",
             password=mock.sentinel.secret1, uuid=uuids.secret1,
@@ -33278,7 +33293,8 @@ class EphemeralEncryptionTestCase(test.NoDBTestCase):
         driver_bdm = block_device_info['ephemerals'][0]
         self.assertEqual(expected_format, driver_bdm['encryption_format'])
         self.assertEqual(uuids.secret2, driver_bdm['encryption_secret_uuid'])
-        keymgr_call2 = mock.call(self.context, self.instance, driver_bdm)
+        keymgr_call2 = mock.call(
+            self.context, self.instance, driver_bdm, secret=None)
         libvirt_call2 = mock.call(
             'volume', f"{self.instance.uuid}_{driver_bdm['uuid']}",
             password=mock.sentinel.secret2, uuid=uuids.secret2,
@@ -33291,7 +33307,8 @@ class EphemeralEncryptionTestCase(test.NoDBTestCase):
         driver_bdm = block_device_info['swap']
         self.assertEqual(expected_format, driver_bdm['encryption_format'])
         self.assertEqual(uuids.secret3, driver_bdm['encryption_secret_uuid'])
-        keymgr_call3 = mock.call(self.context, self.instance, driver_bdm)
+        keymgr_call3 = mock.call(
+            self.context, self.instance, driver_bdm, secret=None)
         libvirt_call3 = mock.call(
             'volume', f"{self.instance.uuid}_{driver_bdm['uuid']}",
             password=mock.sentinel.secret3, uuid=uuids.secret3,
@@ -33435,7 +33452,8 @@ class EphemeralEncryptionTestCase(test.NoDBTestCase):
         driver_bdm = block_device_info['image'][0]
         self.assertIsNone(driver_bdm['encryption_format'])
         self.assertIsNone(driver_bdm['encryption_secret_uuid'])
-        keymgr_call1 = mock.call(self.context, self.instance, driver_bdm)
+        keymgr_call1 = mock.call(
+            self.context, self.instance, driver_bdm, secret=None)
         libvirt_call1 = mock.call(
             'volume', f"{self.instance.uuid}_{driver_bdm['uuid']}",
             password=mock.sentinel.secret1, uuid=uuids.secret1,
@@ -33444,7 +33462,8 @@ class EphemeralEncryptionTestCase(test.NoDBTestCase):
         driver_bdm = block_device_info['ephemerals'][0]
         self.assertIsNone(driver_bdm['encryption_format'])
         self.assertIsNone(driver_bdm['encryption_secret_uuid'])
-        keymgr_call2 = mock.call(self.context, self.instance, driver_bdm)
+        keymgr_call2 = mock.call(
+            self.context, self.instance, driver_bdm, secret=None)
         libvirt_call2 = mock.call(
             'volume', f"{self.instance.uuid}_{driver_bdm['uuid']}",
             password=mock.sentinel.secret2, uuid=uuids.secret2,
@@ -33453,7 +33472,8 @@ class EphemeralEncryptionTestCase(test.NoDBTestCase):
         driver_bdm = block_device_info['swap']
         self.assertIsNone(driver_bdm['encryption_format'])
         self.assertIsNone(driver_bdm['encryption_secret_uuid'])
-        keymgr_call3 = mock.call(self.context, self.instance, driver_bdm)
+        keymgr_call3 = mock.call(
+            self.context, self.instance, driver_bdm, secret=None)
 
         self.assertEqual(
             [keymgr_call1, keymgr_call2, keymgr_call3],

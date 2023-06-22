@@ -2707,3 +2707,8 @@ class EphemeralEncryptionChangeForbidden(Forbidden):
     msg_fmt = _(
         'Only the user_id that owns the instance may change from '
         'ephemeral encryption to no ephemeral encryption or vice versa.')
+
+
+class RBDLayeredEncryptionNotSupported(NotSupported):
+    msg_fmt = _(
+        'This Ceph version does not support RBD layered encryption. %(error)s')

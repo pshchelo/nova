@@ -1031,7 +1031,7 @@ class LibvirtConfigGuestDiskTest(LibvirtConfigBaseTest):
         e.format = "luks"
         s.type = "passphrase"
         s.uuid = uuids.secret
-        e.secret = s
+        e.secrets.append(s)
         setattr(d, encryption, e)
 
         xml = d.to_xml()
@@ -1081,8 +1081,8 @@ class LibvirtConfigGuestDiskTest(LibvirtConfigBaseTest):
         d.parse_dom(xmldoc)
 
         self.assertEqual(d.ephemeral_encryption.format, "luks")
-        self.assertEqual(d.ephemeral_encryption.secret.type, "passphrase")
-        self.assertEqual(d.ephemeral_encryption.secret.uuid, uuids.secret)
+        self.assertEqual(d.ephemeral_encryption.secrets[0].type, "passphrase")
+        self.assertEqual(d.ephemeral_encryption.secrets[0].uuid, uuids.secret)
 
     def test_config_boot_order_parse(self):
         xml = """
@@ -1610,10 +1610,10 @@ class LibvirtConfigGuestDiskBackingStoreTest(LibvirtConfigBaseTest):
         obj.source_file = '/var/lib/libvirt/images/base.qcow2'
         obj.ephemeral_encryption = config.LibvirtConfigGuestDiskEncryption()
         obj.ephemeral_encryption.format = 'luks'
-        obj.ephemeral_encryption.secret = (
-            config.LibvirtConfigGuestDiskEncryptionSecret())
-        obj.ephemeral_encryption.secret.type = 'passphrase'
-        obj.ephemeral_encryption.secret.uuid = 'fakeuuid'
+        secret = config.LibvirtConfigGuestDiskEncryptionSecret()
+        secret.type = 'passphrase'
+        secret.uuid = 'fakeuuid'
+        obj.ephemeral_encryption.secrets.append(secret)
         obj.backing_store = config.LibvirtConfigGuestDiskBackingStore()
 
         xml = obj.to_xml()
@@ -1647,8 +1647,10 @@ class LibvirtConfigGuestDiskBackingStoreTest(LibvirtConfigBaseTest):
         self.assertEqual(obj.index, '4')
         self.assertEqual(obj.source_file, '/var/lib/libvirt/images/base.qcow2')
         self.assertEqual(obj.ephemeral_encryption.format, 'luks')
-        self.assertEqual(obj.ephemeral_encryption.secret.type, 'passphrase')
-        self.assertEqual(obj.ephemeral_encryption.secret.uuid, 'fakeuuid')
+        self.assertEqual(
+            obj.ephemeral_encryption.secrets[0].type, 'passphrase')
+        self.assertEqual(
+            obj.ephemeral_encryption.secrets[0].uuid, 'fakeuuid')
 
 
 class LibvirtConfigGuestFilesysTest(LibvirtConfigBaseTest):

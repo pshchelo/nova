@@ -1755,20 +1755,27 @@ class LibvirtConfigGuestDiskEncryption(LibvirtConfigObject):
         super(LibvirtConfigGuestDiskEncryption, self).__init__(
             root_name='diskencryption', **kwargs)
         self.format = None
-        self.secret = None
+        # There can be more than one secret in the case of RBD layered
+        # encryption: https://libvirt.org/formatstorageencryption.html
+        self.secrets = []
+        self.engine = None
 
     def parse_dom(self, xmldoc):
         self.format = xmldoc.get('format')
+        self.engine = xmldoc.get('engine')
         for c in xmldoc:
             if c.tag == 'secret':
                 m = LibvirtConfigGuestDiskEncryptionSecret()
                 m.parse_dom(c)
-                self.secret = m
+                self.secrets.append(m)
 
     def format_dom(self):
         obj = etree.Element("encryption")
         obj.set("format", self.format)
-        obj.append(self.secret.format_dom())
+        if self.engine is not None:
+            obj.set("engine", self.engine)
+        for secret in self.secrets:
+            obj.append(secret.format_dom())
 
         return obj
 
