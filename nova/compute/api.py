@@ -5649,7 +5649,6 @@ class API:
 
         return _metadata
 
-    @reject_ephemeral_encryption_instances(instance_actions.LIVE_MIGRATION)
     @block_shares_not_supported()
     @block_extended_resource_request
     @block_port_accelerators()

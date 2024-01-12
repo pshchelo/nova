@@ -12183,12 +12183,19 @@ class LibvirtDriver(driver.ComputeDriver):
             LOG.debug('Connecting volumes before live migration.',
                       instance=instance)
 
+        # Libvirt secrets for volume encryption are created on the destination
+        # in _connect_volume.
         for bdm in block_device_mapping:
             connection_info = bdm['connection_info']
             self._connect_volume(context, connection_info, instance)
 
         self._pre_live_migration_plug_vifs(
             instance, network_info, migrate_data)
+
+        # Create libvirt secrets for ephemeral encryption on the destination.
+        self._create_ephemeral_encryption_libvirt_secrets(
+            context, instance.uuid, instance.flavor, instance.image_meta,
+            block_device_info)
 
         # Store server_listen and latest disk device info
         if not migrate_data:
@@ -12430,6 +12437,10 @@ class LibvirtDriver(driver.ComputeDriver):
                               "disconnect volume %s from the source host "
                               "during post_live_migration", volume_id,
                               instance=instance)
+
+        # Destroy libvirt secrets for ephemeral encryption on the source.
+        self._destroy_ephemeral_encryption_libvirt_secrets(
+            context, instance, block_device_info=block_device_info)
 
     def post_live_migration_at_source(self, context, instance, network_info):
         """Unplug VIFs from networks at source.

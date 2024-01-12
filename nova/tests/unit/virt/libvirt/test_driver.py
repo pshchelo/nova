@@ -16976,7 +16976,7 @@ class LibvirtConnTestCase(test.NoDBTestCase,
 
         drvr = libvirt_driver.LibvirtDriver(fake.FakeVirtAPI(), False)
 
-        inst_ref = {'id': 'foo'}
+        inst_ref = objects.Instance(**self.test_instance)
         mig_data = objects.LibvirtLiveMigrateData()
         cntx = context.get_admin_context()
 
@@ -17003,20 +17003,19 @@ class LibvirtConnTestCase(test.NoDBTestCase,
         mock_get_bdm.return_value = [{'connection_info': vol_1_conn_info},
                                      {'connection_info': vol_2_conn_info}]
         mig_data = objects.LibvirtLiveMigrateData()
+        instance = objects.Instance(**self.test_instance)
 
         # Raise an exception with the first call to disconnect_volume
         mock_disconnect_volume.side_effect = [test.TestingException, None]
 
         drvr = libvirt_driver.LibvirtDriver(fake.FakeVirtAPI(), False)
-        drvr.post_live_migration(mock.sentinel.ctxt, mock.sentinel.instance,
+        drvr.post_live_migration(mock.sentinel.ctxt, instance,
                                  mock.sentinel.bdi, mig_data)
 
         # Assert disconnect_volume is called twice despite the exception
         mock_disconnect_volume.assert_has_calls([
-            mock.call(mock.sentinel.ctxt, vol_1_conn_info,
-                      mock.sentinel.instance),
-            mock.call(mock.sentinel.ctxt, vol_2_conn_info,
-                      mock.sentinel.instance)])
+            mock.call(mock.sentinel.ctxt, vol_1_conn_info, instance),
+            mock.call(mock.sentinel.ctxt, vol_2_conn_info, instance)])
 
         # Assert that we log the failure to disconnect the first volume
         self.assertIn("Ignoring exception while attempting to disconnect "

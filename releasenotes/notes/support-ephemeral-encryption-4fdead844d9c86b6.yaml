@@ -18,6 +18,7 @@ features:
     * diagnostics show
     * resize
     * cold migration
+    * live migration
 
     .. note::
 

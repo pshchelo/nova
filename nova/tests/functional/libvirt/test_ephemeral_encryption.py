@@ -45,11 +45,11 @@ class EphemeralEncryptionTestBase(base.ServersTestBase):
         self.driver = self.computes[self.compute].driver
         self._run_periodics()
 
-    def _create_server_with_ephemeral_encryption_flavor(self):
+    def _create_server_with_ephemeral_encryption_flavor(self, **kwargs):
         extra_specs = {'hw:ephemeral_encryption': 'true'}
         flavor_id = self._create_flavor(
             disk=10, ephemeral=5, swap=128, extra_spec=extra_specs)
-        server = self._create_server(flavor_id=flavor_id)
+        server = self._create_server(flavor_id=flavor_id, **kwargs)
         return server
 
     def _get_key_mgr_secrets(self, ctx):
@@ -465,3 +465,127 @@ class EphemeralEncryptionTestResize(EphemeralEncryptionTestBase):
         # We need the admin API for cold migration.
         self.api = self.admin_api
         self.test_resize_server_different_host(is_resize=False)
+
+
+class EphemeralEncryptionLiveMigrateBase(
+    # This has to go before EphemeralEncryptionTestBase so that it patches the
+    # LibvirtFixture before useFixture(LibvirtFixture) happens.
+    base.LibvirtMigrationMixin,
+    EphemeralEncryptionTestBase,
+):
+    # Some live migration auto-configuration was added in later microversions.
+    microversion = 'latest'
+    ADMIN_API = True
+
+    def setUp(self):
+        super().setUp()
+        self.useFixture(fixtures.MockPatch(
+            'nova.virt.libvirt.driver.LibvirtDriver._get_instance_disk_info'))
+        self.useFixture(fixtures.MockPatch('os.rename'))
+        self.useFixture(fixtures.MockPatch(
+            'nova.virt.libvirt.driver.LibvirtDriver.'
+            'check_instance_shared_storage_remote', return_value=False))
+        self.useFixture(fixtures.MockPatch(
+            'nova.virt.libvirt.driver.LibvirtDriver.'
+            '_check_shared_storage_test_file', return_value=False))
+        self.useFixture(fixtures.MockPatch(
+            'nova.virt.libvirt.driver.LibvirtDriver.delete_instance_files'))
+
+        self.start_compute(hostname='compute2')
+        self._run_periodics()
+
+
+class EphemeralEncryptionLiveMigrate(EphemeralEncryptionLiveMigrateBase):
+
+    def test_live_migrate_server(self):
+        # Verify there are no secrets in the key manager.
+        self.assertEqual(0, len(self.key_mgr.list(self.context)))
+
+        # Create a server with ephemeral encryption.
+        server = self._create_server_with_ephemeral_encryption_flavor(
+            networks='none')
+        src_host = self._show_server(server)['OS-EXT-SRV-ATTR:host']
+
+        # There should be three secrets in the key manager, one for the root
+        # disk, one for the ephemeral disk, and one for the swap disk.
+        src_driver = self.computes[src_host].driver
+        bdms = self.assertSecretsMatch(server, 3, src_driver)
+
+        # Set stuff LibvirtMigrationMixin needs in order to work.
+        self.server = server
+        self.src = self.computes[src_host]
+        self.dest = [v for k, v in self.computes.items() if k != src_host][0]
+
+        # Live migrate the server.
+        self._live_migrate_server(server)
+        dest_host = self._show_server(server)['OS-EXT-SRV-ATTR:host']
+
+        # Assert that it moved.
+        self.assertNotEqual(src_host, dest_host)
+
+        # Assert that the libvirt secrets have been removed from the source.
+        self.assertLibvirtSecretsDeleted(bdms, src_driver)
+
+        # The libvirt secrets should be on the destination now and we should
+        # still have the key manager secrets matching.
+        dest_driver = self.computes[dest_host].driver
+        self.assertSecretsMatch(server, 3, dest_driver, bdms=bdms)
+
+        # Delete the server.
+        self._delete_server(server)
+
+        # Verify that there are no libvirt secrets on either host.
+        self.assertSecretsDeleted(bdms, src_driver)
+        self.assertSecretsDeleted(bdms, dest_driver)
+
+
+class EphemeralEncryptionLiveMigrateFail(EphemeralEncryptionLiveMigrateBase):
+
+    def _migrate_stub(self, domain, destination, params, flags):
+        # Make the live migration fail.
+        conn = self.src.driver._host.get_connection()
+        dom = conn.lookupByUUIDString(self.server['id'])
+        dom.fail_job()
+        self.migrate_stub_ran = True
+
+    def test_rollback_live_migration(self):
+        # Verify there are no secrets in the key manager.
+        self.assertEqual(0, len(self.key_mgr.list(self.context)))
+
+        # Create a server with ephemeral encryption.
+        server = self._create_server_with_ephemeral_encryption_flavor(
+            networks='none')
+        src_host = self._show_server(server)['OS-EXT-SRV-ATTR:host']
+
+        # There should be three secrets in the key manager, one for the root
+        # disk, one for the ephemeral disk, and one for the swap disk.
+        src_driver = self.computes[src_host].driver
+        bdms = self.assertSecretsMatch(server, 3, src_driver)
+
+        # Set stuff LibvirtMigrationMixin needs in order to work.
+        self.server = server
+        self.src = self.computes[src_host]
+        self.dest = [v for k, v in self.computes.items() if k != src_host][0]
+
+        # Live migrate the server.
+        self._live_migrate_server(server, migration_expected_state='failed')
+
+        # Assert that it didn't move.
+        self.assertEqual(
+            src_host, self._show_server(server)['OS-EXT-SRV-ATTR:host'])
+
+        # Assert that the libvirt secrets have been removed from the
+        # destination.
+        dest_driver = self.dest.driver
+        self.assertLibvirtSecretsDeleted(bdms, dest_driver)
+
+        # The libvirt secrets should be on the source now and we should
+        # still have the key manager secrets matching.
+        self.assertSecretsMatch(server, 3, src_driver, bdms=bdms)
+
+        # Delete the server.
+        self._delete_server(server)
+
+        # Verify that there are no libvirt secrets on either host.
+        self.assertSecretsDeleted(bdms, src_driver)
+        self.assertSecretsDeleted(bdms, dest_driver)
