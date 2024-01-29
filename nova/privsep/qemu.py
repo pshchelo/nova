@@ -41,15 +41,18 @@ class EncryptionInfo(ty.TypedDict):
     secret: str
     format: str
     details: 'encrypt_details.EncryptDetails'
+    backing_secret: str
 
 
 @nova.privsep.sys_admin_pctxt.entrypoint
 def convert_image(source, dest, in_format, out_format, instances_path,
-                  compress, src_encryption=None, dest_encryption=None):
+                  compress, src_encryption=None, dest_encryption=None,
+                  backing_file_format=None):
     unprivileged_convert_image(source, dest, in_format, out_format,
                                instances_path, compress,
                                src_encryption=src_encryption,
-                               dest_encryption=dest_encryption)
+                               dest_encryption=dest_encryption,
+                               backing_file_format=backing_file_format)
 
 
 # NOTE(mikal): this method is deliberately not wrapped in a privsep entrypoint
@@ -62,6 +65,7 @@ def unprivileged_convert_image(
     compress: bool,
     src_encryption: EncryptionInfo | None = None,
     dest_encryption: EncryptionInfo | None = None,
+    backing_file_format: str | None = None,
 ) -> None:
     """Disk image conversion with qemu-img
 
@@ -153,9 +157,33 @@ def unprivileged_convert_image(
             encryption_opts = [
                 '--object', f"secret,id=sec0,file={src_secret_file.name}",
                 '--image-opts',
-                f"{driver_str}file.driver=file,file.filename={source},"
-                f"{prefix}key-secret=sec0",
             ]
+            csv_opts = [
+                f'{driver_str}file.driver=file',
+                f'file.filename={source}',
+                f'{prefix}key-secret=sec0',
+            ]
+
+            if 'backing_secret' in src_encryption:
+                backing_secret_file = stack.enter_context(
+                    tempfile.NamedTemporaryFile(mode='tr+', encoding='utf-8'))
+                # Write out the passphrase secret to a temp file
+                backing_secret_file.write(src_encryption['backing_secret'])
+
+                # Ensure the secret is written to disk, we can't .close()
+                # here as that removes the file when using
+                # NamedTemporaryFile
+                backing_secret_file.flush()
+
+                bprefix = 'encrypt.' if backing_file_format == 'qcow2' else ''
+                csv_opts += [f'backing.{bprefix}key-secret=sec2']
+                encryption_opts += [
+                    ','.join(csv_opts),
+                    '--object',
+                    f'secret,id=sec2,file={backing_secret_file.name}',
+                ]
+            else:
+                encryption_opts += [','.join(csv_opts)]
 
         if dest_encryption:
             dest_secret_file = stack.enter_context(

@@ -1603,6 +1603,53 @@ class LibvirtConfigGuestDiskBackingStoreTest(LibvirtConfigBaseTest):
         self.assertEqual(obj.backing_store.source_ports[0], '24007')
         self.assertIsNone(obj.backing_store.backing_store)
 
+    def test_config_file_encryption(self):
+        obj = config.LibvirtConfigGuestDiskBackingStore()
+        obj.source_type = 'file'
+        obj.index = '4'
+        obj.source_file = '/var/lib/libvirt/images/base.qcow2'
+        obj.ephemeral_encryption = config.LibvirtConfigGuestDiskEncryption()
+        obj.ephemeral_encryption.format = 'luks'
+        obj.ephemeral_encryption.secret = (
+            config.LibvirtConfigGuestDiskEncryptionSecret())
+        obj.ephemeral_encryption.secret.type = 'passphrase'
+        obj.ephemeral_encryption.secret.uuid = 'fakeuuid'
+        obj.backing_store = config.LibvirtConfigGuestDiskBackingStore()
+
+        xml = obj.to_xml()
+        self.assertXmlEqual(xml, """
+            <backingStore type='file' index='4'>
+              <source file='/var/lib/libvirt/images/base.qcow2'>
+                <encryption format='luks'>
+                  <secret type='passphrase' uuid='fakeuuid'/>
+                </encryption>
+              </source>
+              <backingStore/>
+            </backingStore>""")
+
+    def test_config_file_encryption_parse(self):
+        xml = """<backingStore type='file' index='4'>
+                   <format type='raw'/>
+                   <source file='/var/lib/libvirt/images/base.qcow2'>
+                     <encryption format='luks' engine='qemu'>
+                       <secret type='passphrase' uuid='fakeuuid'/>
+                     </encryption>
+                   </source>
+                   <backingStore/>
+                 </backingStore>
+              """
+        xmldoc = etree.fromstring(xml)
+
+        obj = config.LibvirtConfigGuestDiskBackingStore()
+        obj.parse_dom(xmldoc)
+
+        self.assertEqual(obj.source_type, 'file')
+        self.assertEqual(obj.index, '4')
+        self.assertEqual(obj.source_file, '/var/lib/libvirt/images/base.qcow2')
+        self.assertEqual(obj.ephemeral_encryption.format, 'luks')
+        self.assertEqual(obj.ephemeral_encryption.secret.type, 'passphrase')
+        self.assertEqual(obj.ephemeral_encryption.secret.uuid, 'fakeuuid')
+
 
 class LibvirtConfigGuestFilesysTest(LibvirtConfigBaseTest):
 

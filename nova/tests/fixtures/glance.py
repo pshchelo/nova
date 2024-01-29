@@ -273,6 +273,23 @@ class GlanceFixture(fixtures.Fixture):
             image_id, self.images)
         raise exception.ImageNotFound(image_id=image_id)
 
+    @staticmethod
+    def _remove_empty_kernel_id_and_ramdisk_id(metadata):
+        # NOTE(melwitt): Remove kernel_id and ramdisk_id from the image
+        # metadata if they are empty strings (Instance.kernel_id and
+        # Instance.ramdisk_id can be '' when creating a snapshot image).
+        # In real Glance, kernel_id and ramdisk_id don't appear in the image
+        # properties in this case. When Nova gets a server create request with
+        # image properties kernel_id='' and/or ramdisk_id='' in the image, it
+        # will try to GET /images/{image_id} for an empty string, which will
+        # raise ImageNotFound and fail the server create.
+        keys = ['kernel_id', 'ramdisk_id']
+        metadata_copy = copy.deepcopy(metadata)
+        for key in keys:
+            if metadata_copy.get('properties', {}).get(key) == '':
+                del metadata_copy['properties'][key]
+        return metadata_copy
+
     def create(self, context, metadata, data=None):
         """Store the image data and return the new image id.
 
@@ -317,6 +334,7 @@ class GlanceFixture(fixtures.Fixture):
             image_meta['created_at'] = self.timestamp
         if not image_meta.get('updated_at'):
             image_meta['updated_at'] = self.timestamp
+        image_meta = self._remove_empty_kernel_id_and_ramdisk_id(image_meta)
 
         self.images[image_id] = image_meta
 
@@ -333,6 +351,8 @@ class GlanceFixture(fixtures.Fixture):
         """
         if not self.images.get(image_id):
             raise exception.ImageNotFound(image_id=image_id)
+
+        metadata = self._remove_empty_kernel_id_and_ramdisk_id(metadata)
 
         if purge_props:
             self.images[image_id] = copy.deepcopy(metadata)

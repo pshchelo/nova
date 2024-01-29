@@ -62,31 +62,49 @@ class QemuTestCase(test.NoDBTestCase):
     @mock.patch('nova.privsep.utils.supports_direct_io',
                 new=mock.Mock(return_value=True))
     @ddt.data(
-        ('qcow2', 'qcow2'), ('qcow2', 'raw'),
-        ('luks', 'raw'), ('luks', 'qcow2'))
+        ('qcow2', 'qcow2', False), ('qcow2', 'qcow2', True),
+        ('qcow2', 'raw', False), ('qcow2', 'raw', True),
+        ('luks', 'raw', False), ('luks', 'qcow2', False))
     @ddt.unpack
     def test_convert_image_encrypted_source_to_unencrypted_dest(
-            self, in_format, out_format, mock_tempfile, mock_execute):
+            self, in_format, out_format, backing_secret, mock_tempfile,
+            mock_execute):
         # Simulate an encrypted source image conversion to an unencrypted
         # destination image.
-        mock_file = mock.Mock()
-        mock_file.name = '/tmp/filename'
-        mock_tempfile.return_value.__enter__.return_value = mock_file
+        mock_file1 = mock.Mock()
+        mock_file1.name = '/tmp/filename1'
+        mock_tempfile.return_value.__enter__.return_value = mock_file1
         src_encryption = {'format': 'luks', 'secret': '12345'}
+        if backing_secret:
+            mock_file2 = mock.Mock()
+            mock_file2.name = '/tmp/filename2'
+            mock_tempfile.return_value.__enter__.side_effect = [
+                mock_file1, mock_file2]
+            src_encryption['backing_secret'] = '67890'
 
         nova.privsep.qemu.convert_image(
             '/fake/source', '/fake/dest', in_format, out_format,
             '/fake/instances/path', compress=True,
             src_encryption=src_encryption)
 
-        mock_file.write.assert_called_once_with('12345')
-        mock_file.flush.assert_called_once()
+        mock_file1.write.assert_called_once_with('12345')
+        mock_file1.flush.assert_called_once_with()
+        if backing_secret:
+            mock_file2.write.assert_called_once_with('67890')
+            mock_file2.flush.assert_called_once_with()
+
         prefix = 'encrypt.' if in_format == 'qcow2' else ''
-        mock_execute.assert_called_once_with(
+        expected_command = [
             'qemu-img', 'convert', '-t', 'none', '-O', out_format, '-c',
-            '--object', 'secret,id=sec0,file=/tmp/filename', '--image-opts',
+            '--object', 'secret,id=sec0,file=/tmp/filename1',
+            '--image-opts',
             f'driver={in_format},file.driver=file,file.filename=/fake/source,'
-            f'{prefix}key-secret=sec0', '/fake/dest')
+            f'{prefix}key-secret=sec0']
+        if backing_secret:
+            expected_command[-1] += ',backing.key-secret=sec2'
+            expected_command += [
+                '--object', 'secret,id=sec2,file=/tmp/filename2']
+        mock_execute.assert_called_once_with(*expected_command, '/fake/dest')
 
     @mock.patch('oslo_concurrency.processutils.execute')
     @mock.patch('tempfile.NamedTemporaryFile')
@@ -142,25 +160,34 @@ class QemuTestCase(test.NoDBTestCase):
     @mock.patch('nova.privsep.utils.supports_direct_io',
                 new=mock.Mock(return_value=True))
     @ddt.data(
-        ('qcow2', 'qcow2'), ('qcow2', 'luks'),
-        ('luks', 'luks'), ('luks', 'qcow2'))
+        ('qcow2', 'qcow2', False), ('qcow2', 'qcow2', True),
+        ('qcow2', 'luks', False), ('qcow2', 'luks', True),
+        ('luks', 'luks', False), ('luks', 'qcow2', False))
     @ddt.unpack
     def test_convert_image_encrypted_source_and_dest(
-            self, in_format, out_format, mock_tempfile, mock_execute):
+            self, in_format, out_format, backing_secret, mock_tempfile,
+            mock_execute):
         # Simulate an encrypted source image conversion to an encrypted
         # destination image.
         mock_file1 = mock.Mock()
         mock_file1.name = '/tmp/filename1'
-        src_encryption = {'format': 'luks', 'secret': '12345'}
         mock_file2 = mock.Mock()
         mock_file2.name = '/tmp/filename2'
         mock_tempfile.return_value.__enter__.side_effect = [
             mock_file1, mock_file2]
+        src_encryption = {'format': 'luks', 'secret': '12345'}
+        if backing_secret:
+            mock_file3 = mock.Mock()
+            mock_file3.name = '/tmp/filename3'
+            mock_tempfile.return_value.__enter__.side_effect = [
+                mock_file1, mock_file3, mock_file2]
+            src_encryption['backing_secret'] = '54321'
         dest_encryption = {
             'format': 'luks',
             'secret': '67890',
             'details': encrypt_details.EncryptDetails(),
         }
+
         nova.privsep.qemu.convert_image(
             '/fake/source', '/fake/dest', in_format, out_format,
             '/fake/instances/path', compress=True,
@@ -171,6 +198,9 @@ class QemuTestCase(test.NoDBTestCase):
         mock_file1.flush.assert_called_once()
         mock_file2.write.assert_called_once_with('67890')
         mock_file2.flush.assert_called_once()
+        if backing_secret:
+            mock_file3.write.assert_called_once_with('54321')
+            mock_file3.flush.assert_called_once()
 
         in_prefix = 'encrypt.' if in_format == 'qcow2' else ''
         out_prefix = 'encrypt.' if out_format == 'qcow2' else ''
@@ -178,12 +208,17 @@ class QemuTestCase(test.NoDBTestCase):
             'qemu-img', 'convert', '-t', 'none', '-O', out_format, '-c',
             '--object', 'secret,id=sec0,file=/tmp/filename1', '--image-opts',
             f'driver={in_format},file.driver=file,file.filename=/fake/source,'
-            f'{in_prefix}key-secret=sec0',
+            f'{in_prefix}key-secret=sec0']
+        if backing_secret:
+            expected_args[-1] += ',backing.key-secret=sec2'
+            expected_args += [
+                '--object', 'secret,id=sec2,file=/tmp/filename3']
+        expected_args += [
             '--object', 'secret,id=sec1,file=/tmp/filename2',
-            '-o', f'{out_prefix}key-secret=sec1',
-        ]
+            '-o', f'{out_prefix}key-secret=sec1']
         if out_prefix:
             expected_args += ['-o', f'{out_prefix}format=luks']
+
         expected_args += [
             '-o', f'{out_prefix}cipher-alg=aes-256',
             '-o', f'{out_prefix}cipher-mode=xts',

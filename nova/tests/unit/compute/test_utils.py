@@ -1816,27 +1816,35 @@ class EphemeralEncryptionTestCase(test.NoDBTestCase):
     def test_delete_secrets(self, mock_delete_secret):
         instance_uuid = uuids.instance
         bdm1 = objects.BlockDeviceMapping(
-            encryption_secret_uuid=uuids.secret1, destination_type='local')
+            encryption_secret_uuid=uuids.secret1, destination_type='local',
+            backing_encryption_secret_uuid=uuids.secret2)
         bdm2 = objects.BlockDeviceMapping(
-            encryption_secret_uuid=uuids.secret2, destination_type='local')
+            encryption_secret_uuid=uuids.secret3, destination_type='local',
+            backing_encryption_secret_uuid=uuids.secret4)
         bdm3 = objects.BlockDeviceMapping(
-            encryption_secret_uuid=uuids.secret3, destination_type='volume')
+            encryption_secret_uuid=uuids.secret5, destination_type='volume',
+            backing_encryption_secret_uuid=uuids.secret6)
         bdms = [bdm1, bdm2, bdm3]
         compute_utils.delete_bdms_encryption_secrets(
             self.context, instance_uuid, bdms)
         # Only local BDMs should have had their secrets deleted.
         call1 = mock.call(self.context, instance_uuid, uuids.secret1)
         call2 = mock.call(self.context, instance_uuid, uuids.secret2)
-        self.assertEqual([call1, call2], mock_delete_secret.mock_calls)
+        call3 = mock.call(self.context, instance_uuid, uuids.secret3)
+        call4 = mock.call(self.context, instance_uuid, uuids.secret4)
+        self.assertEqual(
+            [call1, call2, call3, call4], mock_delete_secret.mock_calls)
 
     @mock.patch('nova.crypto.delete_encryption_secret')
     def test_delete_secrets_none(self, mock_delete_secret):
         # Test a case where no BDM has an encryption secret UUID.
         instance_uuid = uuids.instance
         bdm1 = objects.BlockDeviceMapping(
-            encryption_secret_uuid=None, destination_type='local')
+            encryption_secret_uuid=None, destination_type='local',
+            backing_encryption_secret_uuid=None)
         bdm2 = objects.BlockDeviceMapping(
-            encryption_secret_uuid=None, destination_type='local')
+            encryption_secret_uuid=None, destination_type='local',
+            backing_encryption_secret_uuid=None)
         bdms = [bdm1, bdm2]
         compute_utils.delete_bdms_encryption_secrets(
             self.context, instance_uuid, bdms)
@@ -1848,16 +1856,22 @@ class EphemeralEncryptionTestCase(test.NoDBTestCase):
         # Test a case where one secret deletion fails.
         instance_uuid = uuids.instance
         bdm1 = objects.BlockDeviceMapping(
-            encryption_secret_uuid=uuids.secret1, destination_type='local')
+            encryption_secret_uuid=uuids.secret1, destination_type='local',
+            backing_encryption_secret_uuid=uuids.secret2)
         bdm2 = objects.BlockDeviceMapping(
-            encryption_secret_uuid=uuids.secret2, destination_type='local')
+            encryption_secret_uuid=uuids.secret3, destination_type='local',
+            backing_encryption_secret_uuid=uuids.secret4)
         bdms = [bdm1, bdm2]
-        mock_delete_secret.side_effect = [test.TestingException(), None]
+        mock_delete_secret.side_effect = [
+            test.TestingException(), None, None, None]
         compute_utils.delete_bdms_encryption_secrets(
             self.context, instance_uuid, bdms)
         call1 = mock.call(self.context, instance_uuid, uuids.secret1)
         call2 = mock.call(self.context, instance_uuid, uuids.secret2)
-        self.assertEqual([call1, call2], mock_delete_secret.mock_calls)
+        call3 = mock.call(self.context, instance_uuid, uuids.secret3)
+        call4 = mock.call(self.context, instance_uuid, uuids.secret4)
+        self.assertEqual(
+            [call1, call2, call3, call4], mock_delete_secret.mock_calls)
         msg = (
             f'Failed to delete encryption secret {uuids.secret1} from the key '
             'manager.')

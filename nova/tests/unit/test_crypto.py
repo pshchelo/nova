@@ -479,6 +479,30 @@ class EncryptionSecretTest(test.NoDBTestCase):
         self._test_create_ephemeral_encryption_secret(
             for_detail='image fake-image')
 
+    @mock.patch('oslo_serialization.base64.encode_as_text')
+    @mock.patch('castellan.common.objects.passphrase.Passphrase')
+    @mock.patch.object(crypto, '_get_key_manager')
+    def test_create_ephemeral_encryption_secret_specified_secret(
+            self, mock_get_manager, mock_pass, mock_text):
+        instance = objects.Instance(uuid=uuids.instance)
+        driver_bdm = {'uuid': uuids.driver_bdm}
+        passphrase = mock.Mock()
+        mock_pass.return_value = passphrase
+
+        secret_uuid, secret = crypto.create_ephemeral_encryption_secret(
+            self.ctxt, instance, driver_bdm, secret=mock.sentinel.secret)
+
+        self.assertEqual(
+            mock_get_manager.return_value.store.return_value, secret_uuid)
+        self.assertEqual(mock.sentinel.secret, secret)
+        mock_text.assert_not_called()
+        mock_pass.assert_called_once_with(
+            mock.sentinel.secret,
+            name=f'Ephemeral encryption secret for instance {instance.uuid} '
+                 f'BDM {driver_bdm["uuid"]}')
+        mock_get_manager.return_value.store.assert_called_once_with(
+            self.ctxt, passphrase)
+
     @mock.patch.object(crypto, '_get_key_manager')
     def test_get_encryption_secret(self, mock_get_manager):
         passphrase = FakePassphrase()

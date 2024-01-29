@@ -1343,6 +1343,9 @@ class LibvirtConfigGuestDisk(LibvirtConfigGuestDevice):
             #   https://libvirt.org/formatdomain.html#hard-drives-floppy-disks-cdroms
             #   https://bugzilla.redhat.com/show_bug.cgi?id=1371022#c13
             source.append(self.ephemeral_encryption.format_dom())
+            # Encrypted backing file, if present.
+            if self.backing_store is not None:
+                dev.append(self.backing_store.format_dom())
 
         if self.auth_secret_type is not None:
             auth = etree.Element("auth")
@@ -1478,6 +1481,32 @@ class LibvirtConfigGuestDiskBackingStore(LibvirtConfigObject):
         self.driver_name = None
         self.driver_format = None
         self.backing_store = None
+        self.format = None
+        self.ephemeral_encryption = None
+
+    def format_dom(self):
+        # https://libvirt.org/kbase/backing_chains.html
+        bstore = super(LibvirtConfigGuestDiskBackingStore, self).format_dom()
+
+        if self.source_type is not None:
+            bstore.set('type', self.source_type)
+
+        if self.index is not None:
+            bstore.set('index', self.index)
+
+        if self.format is not None:
+            bstore.append(etree.Element('format', type=self.format))
+
+        if self.source_type == 'file':
+            source = etree.Element('source', file=self.source_file)
+            if self.ephemeral_encryption is not None:
+                source.append(self.ephemeral_encryption.format_dom())
+            bstore.append(source)
+
+        if self.backing_store is not None:
+            bstore.append(self.backing_store.format_dom())
+
+        return bstore
 
     def parse_dom(self, xmldoc):
         super(LibvirtConfigGuestDiskBackingStore, self).parse_dom(xmldoc)
@@ -1497,6 +1526,10 @@ class LibvirtConfigGuestDiskBackingStore(LibvirtConfigObject):
                     if d.tag == 'host':
                         self.source_hosts.append(d.get('name'))
                         self.source_ports.append(d.get('port'))
+                    elif d.tag == 'encryption':
+                        e = LibvirtConfigGuestDiskEncryption()
+                        e.parse_dom(d)
+                        self.ephemeral_encryption = e
             elif c.tag == 'backingStore':
                 if len(c):
                     self.backing_store = LibvirtConfigGuestDiskBackingStore()

@@ -16097,10 +16097,10 @@ class LibvirtConnTestCase(test.NoDBTestCase,
                           host='fake_host', receive=True)
             ])
             fetch_image_mock.assert_has_calls([
-                mock.call(context=self.context,
-                          target=backfile_path,
+                mock.call(target=backfile_path, src_encryption=None,
+                          dest_encryption=None, context=self.context,
                           image_id=self.test_instance['image_ref'],
-                          trusted_certs=trusted_certs, src_encryption=None),
+                          trusted_certs=trusted_certs),
                 mock.call(self.context, kernel_path, instance.kernel_id,
                           trusted_certs),
                 mock.call(self.context, ramdisk_path, instance.ramdisk_id,
@@ -16250,13 +16250,14 @@ class LibvirtConnTestCase(test.NoDBTestCase,
             # related bug fix from https://launchpad.net/bugs/2061701
             create_ephemeral_mock.assert_called_once_with(
                 ephemeral_size=1, fs_label='ephemeral0',
+                src_encryption=None, dest_encryption=None,
                 os_type='linux', target=ephemeral_backing,
                 context=self.context)
 
             fetch_image_mock.assert_called_once_with(
+                target=root_backing, src_encryption=None, dest_encryption=None,
                 context=self.context, image_id=instance.image_ref,
-                target=root_backing, trusted_certs=instance.trusted_certs,
-                src_encryption=None)
+                trusted_certs=instance.trusted_certs)
 
             verify_base_size_mock.assert_has_calls([
                 mock.call(root_backing, instance.flavor.root_gb * units.Gi),
@@ -26432,6 +26433,7 @@ class LibvirtDriverTestCase(test.NoDBTestCase, TraitsComparisonMixin):
             expected_backing_file = os.path.join(
                     imagecache.ImageCacheManager().cache_dir,
                     base_image_root_fname)
+            mock_fetch.return_value = None
         else:
             # None means rebase will merge backing file into disk(flatten).
             expected_backing_file = None
@@ -30589,13 +30591,13 @@ class LibvirtDriverTestCase(test.NoDBTestCase, TraitsComparisonMixin):
             mock_file_obj.write.assert_called_once_with(mock.sentinel.secret)
             mock_file_obj.flush.assert_called_once_with()
             extra_args = [
-                '--object', 'secret,id=sec,file=fakefile', '--image-opts',
-                'encrypt.key-secret=sec,file.filename=disk']
+                '--object', 'secret,id=sec0,file=fakefile', '--image-opts',
+                'file.filename=disk,encrypt.key-secret=sec0']
 
         mock_qemu_img_info.assert_called_once_with("backing_file")
-        mock_execute.assert_called_once_with('qemu-img', 'rebase',
-                                             '-b', 'backing_file', '-F',
-                                             'fake_fmt', *extra_args)
+        mock_execute.assert_called_once_with(
+            'qemu-img', 'rebase', '-b', 'backing_file', '-F', 'fake_fmt',
+            *extra_args)
 
         # Flatten disk image when no backing file is given.
         mock_qemu_img_info.reset_mock()
@@ -33018,7 +33020,7 @@ class EphemeralEncryptionTestCase(test.NoDBTestCase):
 
         block_device_info = driver.get_block_device_info(
             self.instance, [self.img_bdm, self.eph_bdm, self.swap_bdm])
-        image_meta = objects.ImageMeta.from_dict({})
+        image_meta = objects.ImageMeta.from_dict({'id': uuids.image})
 
         self.drvr.spawn(
             self.context, self.instance, image_meta, [], None, {},
@@ -33110,7 +33112,7 @@ class EphemeralEncryptionTestCase(test.NoDBTestCase):
 
         block_device_info = driver.get_block_device_info(
             self.instance, [self.img_bdm, self.eph_bdm, self.swap_bdm])
-        image_meta = objects.ImageMeta.from_dict({})
+        image_meta = objects.ImageMeta.from_dict({'id': uuids.image})
 
         self.assertRaises(
             exception.EphemeralEncryptionSecretNotFound, self.drvr.spawn,
@@ -33185,7 +33187,7 @@ class EphemeralEncryptionTestCase(test.NoDBTestCase):
 
         block_device_info = driver.get_block_device_info(
             self.instance, [self.img_bdm, self.eph_bdm, self.swap_bdm])
-        image_meta = objects.ImageMeta.from_dict({})
+        image_meta = objects.ImageMeta.from_dict({'id': uuids.image})
 
         self.assertRaises(
             test.TestingException, self.drvr.spawn, self.context,
@@ -33275,7 +33277,7 @@ class EphemeralEncryptionTestCase(test.NoDBTestCase):
 
         block_device_info = driver.get_block_device_info(
             self.instance, [self.img_bdm, self.eph_bdm, self.swap_bdm])
-        image_meta = objects.ImageMeta.from_dict({})
+        image_meta = objects.ImageMeta.from_dict({'id': uuids.image})
 
         self.assertRaises(
             test.TestingException, self.drvr.spawn, self.context,
@@ -33322,7 +33324,7 @@ class EphemeralEncryptionTestCase(test.NoDBTestCase):
     @mock.patch('nova.objects.instance.Instance.save', new=mock.Mock())
     def _test_cleanup_with_ephemeral_encryption(
         self, has_key_mgr_secret=True, has_libvirt_secret=True,
-        destroy_disks=True
+        destroy_disks=True, has_backing_secret=False
     ):
         mock_domain = mock.Mock(fakelibvirt.virDomain)
         mock_domain.ID.return_value = 123
@@ -33336,16 +33338,20 @@ class EphemeralEncryptionTestCase(test.NoDBTestCase):
 
         # Create a DriverBlockDevice list from a BlockDeviceMapping object.
         encryption_secret_uuid = uuids.secret if has_key_mgr_secret else None
+        backing_encryption_secret_uuid = (
+            uuids.bsecret if has_backing_secret else None)
         bdm = block_device_obj.BlockDeviceMapping(
-            id=1, uuid=uuids.ephemeral, device_type='disk', disk_bus='virtio',
-            no_device=False, device_name='/dev/vdb', volume_size=1,
-            source_type='blank', destination_type='local', guest_format=None,
+            id=1, uuid=uuids.image, device_type='disk', disk_bus='virtio',
+            no_device=False, device_name='/dev/vda', volume_size=1,
+            source_type='image', destination_type='local', guest_format=None,
+            image_id = uuids.source_image,
             encrypted=True, encryption_format='plain',
             encryption_details=None,
             encryption_secret_uuid=encryption_secret_uuid,
+            backing_encryption_secret_uuid=backing_encryption_secret_uuid,
         )
-        ephemerals = [driver_block_device.DriverEphemeralBlockDevice(bdm)]
-        block_device_info = {'ephemerals': ephemerals}
+        image = [driver_block_device.DriverImageBlockDevice(bdm)]
+        block_device_info = {'image': image}
         self.instance.cleaned = True
 
         # Call cleanup() with encrypted ephemeral block device.
@@ -33358,14 +33364,21 @@ class EphemeralEncryptionTestCase(test.NoDBTestCase):
 
         # Assert that we deleted the libvirt secret.
         if has_libvirt_secret and destroy_disks:
-            secret_usage = f'{self.instance.uuid}_{uuids.ephemeral}'
-            self.drvr._host.delete_secret.assert_called_once_with(
-                'volume', secret_usage)
+            secret_usage = f'{self.instance.uuid}_{uuids.image}'
+            expected_calls = [mock.call('volume', secret_usage)]
+            if has_backing_secret:
+                secret_usage += '_backing'
+                expected_calls.append(mock.call('volume', secret_usage))
+            self.assertEqual(
+                expected_calls, self.drvr._host.delete_secret.mock_calls)
         else:
             self.drvr._host.delete_secret.assert_not_called()
 
     def test_cleanup_with_ephemeral_encryption(self):
         self._test_cleanup_with_ephemeral_encryption()
+
+    def test_cleanup_with_ephemeral_encryption_has_backing_secret(self):
+        self._test_cleanup_with_ephemeral_encryption(has_backing_secret=True)
 
     def test_cleanup_with_ephemeral_encryption_no_key_mgr_secret(self):
         self._test_cleanup_with_ephemeral_encryption(has_key_mgr_secret=False)

@@ -736,7 +736,7 @@ class InstanceHelperMixin:
 
     def _snapshot_server(self, server, snapshot_name):
         """Create server snapshot."""
-        self.api.post_server_action(
+        return self.api.post_server_action(
             server['id'],
             {'createImage': {'name': snapshot_name}}
         )
