@@ -243,7 +243,8 @@ class TestDriverBlockDevice(test.NoDBTestCase):
          'encrypted': True,
          'encryption_secret_uuid': uuids.secret,
          'encryption_format': 'plain',
-         'encryption_details': None})
+         'encryption_details': None,
+         'backing_encryption_secret_uuid': None})
 
     image_driver_bdm = {
         'device_name': '/dev/vda',
@@ -256,7 +257,8 @@ class TestDriverBlockDevice(test.NoDBTestCase):
         'encrypted': True,
         'encryption_secret_uuid': uuids.secret,
         'encryption_format': 'plain',
-        'encryption_details': None}
+        'encryption_details': None,
+        'backing_encryption_secret_uuid': None}
 
     def setUp(self):
         super(TestDriverBlockDevice, self).setUp()

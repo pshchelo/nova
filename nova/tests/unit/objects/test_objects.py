@@ -1079,7 +1079,7 @@ class TestRegistry(test.NoDBTestCase):
 object_data = {
     'Aggregate': '1.3-f315cb68906307ca2d1cca84d4753585',
     'AggregateList': '1.3-3ea55a050354e72ef3306adefa553957',
-    'BlockDeviceMapping': '1.22-bd046544ce33279aed88d5e92cae0b8d',
+    'BlockDeviceMapping': '1.23-9e71f0664739e4e35c0890d1ce450417',
     'BlockDeviceMappingList': '1.18-73bcbbae5ef5e8adcedbc821db869306',
     'BuildRequest': '1.3-077dee42bed93f8a5b62be77657b7152',
     'BuildRequestList': '1.0-cd95608eccb89fbc702c8b52f38ec738',

@@ -32956,19 +32956,19 @@ class EphemeralEncryptionTestCase(test.NoDBTestCase):
             device_name='/dev/vda', volume_size=1, source_type='image',
             destination_type='local', guest_format=None, encrypted=True,
             encryption_format=None, encryption_details=None,
-            encryption_secret_uuid=None)
+            encryption_secret_uuid=None, backing_encryption_secret_uuid=None)
         self.eph_bdm = block_device_obj.BlockDeviceMapping(
             id=2, uuid=uuids.ephemeral, device_type='disk', disk_bus='virtio',
             no_device=False, device_name='/dev/vdb', volume_size=1,
             source_type='blank', destination_type='local', guest_format=None,
             encrypted=True, encryption_format=None, encryption_details=None,
-            encryption_secret_uuid=None)
+            encryption_secret_uuid=None, backing_encryption_secret_uuid=None)
         self.swap_bdm = block_device_obj.BlockDeviceMapping(
             id=3, uuid=uuids.swap, device_type='disk', disk_bus='virtio',
             no_device=False, device_name='/dev/vdc', volume_size=1,
             source_type='blank', destination_type='local', guest_format='swap',
             encrypted=True, encryption_format=None, encryption_details=None,
-            encryption_secret_uuid=None)
+            encryption_secret_uuid=None, backing_encryption_secret_uuid=None)
 
         # Mock things we need to assert.
         self.mock_get_image_meta_by_ref = self.useFixture(fixtures.MockPatch(

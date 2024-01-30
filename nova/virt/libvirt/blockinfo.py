@@ -405,6 +405,8 @@ def get_info_from_bdm(instance, virt_type, image_meta, bdm,
     if bdm.get('encrypted'):
         bdm_info['encrypted'] = bdm.get('encrypted')
         bdm_info['encryption_secret_uuid'] = bdm.get('encryption_secret_uuid')
+        bdm_info['backing_encryption_secret_uuid'] = bdm.get(
+            'backing_encryption_secret_uuid')
         bdm_info['encryption_format'] = bdm.get('encryption_format')
         bdm_info['encryption_details'] = bdm.get('encryption_details')
 
