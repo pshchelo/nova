@@ -4270,11 +4270,6 @@ class API:
         # is upgraded to the point of supporting cross-cell resize on all
         # compute services.
         if allowed:
-            # TODO(melwitt): Remove this block when snapshot with ephemeral
-            # encryption is supported.
-            if hardware.get_ephemeral_encryption_constraint(
-                    instance.flavor, instance.image_meta):
-                return False
             # TODO(mriedem): We can remove this minimum compute version check
             # in the 22.0.0 "V" release.
             if min_comp_ver < MIN_COMPUTE_CROSS_CELL_RESIZE:

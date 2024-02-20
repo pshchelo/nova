@@ -14172,7 +14172,7 @@ class ComputeManagerMigrationTestCase(test.NoDBTestCase,
         old_flavor = self.instance.flavor
         # Mock out ImageMeta.
         if snapshot_id:
-            from_image_ref.return_value = objects.ImageMeta()
+            from_image_ref.return_value = objects.ImageMeta.from_dict({})
         # Setup the fake migration.
         self.migration.migration_type = 'resize'
         self.migration.dest_compute = uuids.dest

@@ -18512,6 +18512,8 @@ class LibvirtConnTestCase(test.NoDBTestCase,
             self.assertFalse(service_mock.disabled)
             self.assertIsNone(service_mock.disabled_reason)
 
+    @mock.patch('nova.objects.BlockDeviceMappingList.get_by_instance_uuid',
+                new=mock.Mock(return_value=[]))
     @mock.patch.object(libvirt_driver.AsyncDeviceEventsHandler,
                        'cleanup_waiters')
     @mock.patch.object(libvirt_driver.LibvirtDriver, 'delete_instance_files')
@@ -22598,6 +22600,8 @@ class LibvirtConnTestCase(test.NoDBTestCase,
                               drvr.cleanup, 'ctxt', fake_inst, 'netinfo')
             unplug.assert_called_once_with(fake_inst, 'netinfo', True)
 
+    @mock.patch('nova.objects.BlockDeviceMappingList.get_by_instance_uuid',
+                new=mock.Mock(return_value=[]))
     @mock.patch('nova.virt.libvirt.driver.LibvirtDriver._undefine_domain')
     @mock.patch('nova.crypto.delete_vtpm_secret')
     @mock.patch('nova.virt.libvirt.driver.LibvirtDriver.delete_instance_files')
@@ -22655,6 +22659,8 @@ class LibvirtConnTestCase(test.NoDBTestCase,
         mock_undefine.assert_called_once_with(fake_inst, keep_vtpm=True,
                                               keep_nvram=True)
 
+    @mock.patch('nova.objects.BlockDeviceMappingList.get_by_instance_uuid',
+                new=mock.Mock(return_value=[]))
     @mock.patch('nova.virt.libvirt.driver.LibvirtDriver._undefine_domain')
     @mock.patch('nova.crypto.delete_vtpm_secret')
     @mock.patch('nova.virt.libvirt.driver.LibvirtDriver.delete_instance_files')
@@ -33549,9 +33555,12 @@ class EphemeralEncryptionTestCase(test.NoDBTestCase):
         self.drvr._host.delete_secret.assert_not_called()
 
     @mock.patch('nova.objects.instance.Instance.save', new=mock.Mock())
+    @mock.patch('nova.virt.driver.get_block_device_info')
+    @mock.patch('nova.objects.BlockDeviceMappingList.get_by_instance_uuid')
     def _test_cleanup_with_ephemeral_encryption(
-        self, has_key_mgr_secret=True, has_libvirt_secret=True,
-        destroy_disks=True, has_backing_secret=False
+        self, mock_get_bdms, mock_get_block_device_info,
+        has_key_mgr_secret=True, has_libvirt_secret=True, destroy_disks=True,
+        has_backing_secret=False
     ):
         mock_domain = mock.Mock(fakelibvirt.virDomain)
         mock_domain.ID.return_value = 123
@@ -33601,6 +33610,11 @@ class EphemeralEncryptionTestCase(test.NoDBTestCase):
         else:
             self.drvr._host.delete_secret.assert_not_called()
 
+        # Assert that we did not query for BDMs or block_device_info when
+        # block_device_info was provided.
+        mock_get_bdms.assert_not_called()
+        mock_get_block_device_info.assert_not_called()
+
     def test_cleanup_with_ephemeral_encryption(self):
         self._test_cleanup_with_ephemeral_encryption()
 
@@ -33615,6 +33629,16 @@ class EphemeralEncryptionTestCase(test.NoDBTestCase):
 
     def test_cleanup_with_ephemeral_encryption_no_destroy_disks(self):
         self._test_cleanup_with_ephemeral_encryption(destroy_disks=False)
+
+    @mock.patch('nova.objects.instance.Instance.save', new=mock.Mock())
+    @mock.patch('nova.virt.driver.get_block_device_info')
+    @mock.patch('nova.objects.BlockDeviceMappingList.get_by_instance_uuid')
+    def test_cleanup_with_ephemeral_encryption_no_block_device_info(
+            self, mock_get_bdms, mock_get_block_device_info):
+        self.drvr.cleanup(self.context, self.instance, [])
+        mock_get_bdms.assert_called_once_with(self.context, self.instance.uuid)
+        mock_get_block_device_info.assert_called_once_with(
+            self.instance, mock_get_bdms.return_value)
 
     def test__cleanup_delete_secret_fails(self):
         # Test exception handling when libvirt secret deletion fails during

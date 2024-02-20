@@ -23,8 +23,3 @@ features:
     * rescue
     * snapshot
     * shelve/unshelve
-
-    .. note::
-
-      Cross cell resize of servers specifying ephemeral encryption is not
-      supported yet as it requires support of snapshots.
