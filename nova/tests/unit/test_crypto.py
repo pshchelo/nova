@@ -408,10 +408,47 @@ class EncryptionSecretTest(test.NoDBTestCase):
         super().setUp()
         self.ctxt = nova_context.get_admin_context()
 
+    @mock.patch('castellan.common.objects.passphrase.Passphrase')
+    @mock.patch.object(crypto, '_get_key_manager')
+    def test_create_encryption_secret(self, mock_get_manager, mock_pass):
+        passphrase = mock.Mock()
+        mock_pass.return_value = passphrase
+        secret_uuid = crypto.create_encryption_secret(
+            self.ctxt, mock.sentinel.secret, 'My secret')
+        self.assertEqual(
+            mock_get_manager.return_value.store.return_value, secret_uuid)
+        mock_pass.assert_called_once_with(
+            mock.sentinel.secret, name='My secret')
+        mock_get_manager.return_value.store.assert_called_once_with(
+            self.ctxt, passphrase)
+
+    @mock.patch('nova.crypto.LOG.error')
+    @mock.patch('castellan.common.objects.passphrase.Passphrase')
+    @mock.patch.object(crypto, '_get_key_manager')
+    def test_create_encryption_secret_error(
+            self, mock_get_manager, mock_pass, mock_log_error):
+        mock_get_manager.return_value.store.side_effect = (
+            castellan_exception.KeyManagerError('error'))
+        passphrase = mock.Mock()
+        mock_pass.return_value = passphrase
+        ex = self.assertRaises(
+            exception.EncryptionSecretCreateFailed,
+            crypto.create_encryption_secret, self.ctxt, mock.sentinel.secret,
+            'My secret')
+        self.assertIn(
+            'Failed to create encryption secret with name "My secret": error',
+            str(ex))
+        mock_log_error.assert_called_once_with(
+                'Creation of secret with name "My secret" failed: error')
+        mock_pass.assert_called_once_with(
+            mock.sentinel.secret, name='My secret')
+        mock_get_manager.return_value.store.assert_called_once_with(
+            self.ctxt, passphrase)
+
     @mock.patch('oslo_serialization.base64.encode_as_text')
     @mock.patch('castellan.common.objects.passphrase.Passphrase')
     @mock.patch.object(crypto, '_get_key_manager')
-    def _test_create_encryption_secret(
+    def _test_create_ephemeral_encryption_secret(
             self, mock_get_manager, mock_pass, mock_text, for_detail=None):
 
         instance = objects.Instance(uuid=uuids.instance)
@@ -422,7 +459,7 @@ class EncryptionSecretTest(test.NoDBTestCase):
             for_detail = f'instance {instance.uuid} BDM {driver_bdm["uuid"]}'
         secret_name = f'Ephemeral encryption secret for {for_detail}'
 
-        secret_uuid, secret = crypto.create_encryption_secret(
+        secret_uuid, secret = crypto.create_ephemeral_encryption_secret(
             self.ctxt, instance, driver_bdm, for_detail=for_detail)
 
         self.assertEqual(
@@ -433,11 +470,12 @@ class EncryptionSecretTest(test.NoDBTestCase):
         mock_get_manager.return_value.store.assert_called_once_with(
             self.ctxt, passphrase)
 
-    def test_create_encryption_secret(self):
-        self._test_create_encryption_secret()
+    def test_create_ephemeral_encryption_secret(self):
+        self._test_create_ephemeral_encryption_secret()
 
-    def test_create_encryption_secret_for_image(self):
-        self._test_create_encryption_secret(for_detail='image fake-image')
+    def test_create_ephemeral_encryption_secret_for_image(self):
+        self._test_create_ephemeral_encryption_secret(
+            for_detail='image fake-image')
 
     @mock.patch.object(crypto, '_get_key_manager')
     def test_get_encryption_secret(self, mock_get_manager):

@@ -2659,6 +2659,11 @@ class EphemeralEncryptionCleanupFailed(NovaException):
                 "%(error)s")
 
 
+class EncryptionSecretCreateFailed(NovaException):
+    msg_fmt = _(
+        'Failed to create encryption secret with name "%(name)s": %(error)s')
+
+
 class HostConflict(Exception):
     pass
 

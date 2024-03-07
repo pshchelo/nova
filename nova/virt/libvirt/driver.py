@@ -4714,7 +4714,7 @@ class LibvirtDriver(driver.ComputeDriver):
         secret_uuid = driver_bdm.get('encryption_secret_uuid')
         if secret_uuid is None:
             # Create a passphrase and stash it in the key manager
-            secret_uuid, secret = crypto.create_encryption_secret(
+            secret_uuid, secret = crypto.create_ephemeral_encryption_secret(
                 context, instance, driver_bdm)
             # Stash the UUID of said secret in our driver BDM
             driver_bdm['encryption_secret_uuid'] = secret_uuid

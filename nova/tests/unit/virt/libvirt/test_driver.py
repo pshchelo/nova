@@ -32887,7 +32887,7 @@ class EphemeralEncryptionTestCase(test.NoDBTestCase):
         self.mock_save = self.useFixture(fixtures.MockPatch(
             'nova.virt.block_device.DriverBlockDevice.save')).mock
         self.mock_create_secret = self.useFixture(fixtures.MockPatch(
-            'nova.crypto.create_encryption_secret')).mock
+            'nova.crypto.create_ephemeral_encryption_secret')).mock
         self.mock_get_secret = self.useFixture(fixtures.MockPatch(
             'nova.crypto.get_encryption_secret')).mock
         self.mock_delete_secret = self.useFixture(fixtures.MockPatch(
