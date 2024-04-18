@@ -286,7 +286,10 @@ class _VirtDriverTestCase(_FakeDriverBackendTestCase):
 
     @catch_notimplementederror
     def test_rescue(self):
-        image_meta = objects.ImageMeta.from_dict({})
+        # Set the rescue image id to an existing image so that it will be found
+        # when querying glance for the image properties.
+        image_meta = objects.ImageMeta.from_dict(
+            {'id': 'cedef40a-ed67-4d10-800e-17455edce175'})
         instance_ref, network_info = self._get_running_instance()
         share_info = objects.ShareMappingList()
         self.connection.rescue(self.ctxt, instance_ref, network_info,
@@ -300,7 +303,10 @@ class _VirtDriverTestCase(_FakeDriverBackendTestCase):
     @catch_notimplementederror
     @mock.patch('os.unlink')
     def test_unrescue_rescued_instance(self, mock_unlink):
-        image_meta = objects.ImageMeta.from_dict({})
+        # Set the rescue image id to an existing image so that it will be found
+        # when querying glance for the image properties.
+        image_meta = objects.ImageMeta.from_dict(
+            {'id': 'cedef40a-ed67-4d10-800e-17455edce175'})
         instance_ref, network_info = self._get_running_instance()
         share_info = objects.ShareMappingList()
         self.connection.rescue(self.ctxt, instance_ref, network_info,

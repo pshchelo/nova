@@ -64,13 +64,12 @@ class EphemeralEncryptionTestBase(base.ServersTestBase):
         # Return a dict of {uuid: secret}
         return {obj.id: obj.value for obj in self.key_mgr.list(ctx)}
 
-    def assertSecretsMatch(self, server, num_expected, driver, bdms=None):
-        # Verify the expected number of secrets are in the key manager.
-        keymgr_secrets = self._get_key_mgr_secrets(self.context)
-        self.assertEqual(num_expected, len(keymgr_secrets))
+    def assertLibvirtSecretsMatch(
+            self, server, num_expected, driver, bdms=None):
         if bdms is None:
             bdms = objects.BlockDeviceMappingList.get_by_instance_uuid(
                 self.context, server['id'])
+        keymgr_secrets = self._get_key_mgr_secrets(self.context)
         # Verify the expected number of BDMs.
         self.assertEqual(num_expected, len(bdms))
         # Verify that the BDM libvirt secrets match the secrets in the key
@@ -81,6 +80,13 @@ class EphemeralEncryptionTestBase(base.ServersTestBase):
             self.assertEqual(
                 s.value(), keymgr_secrets[bdm.encryption_secret_uuid])
         return bdms
+
+    def assertSecretsMatch(self, server, num_expected, driver, bdms=None):
+        # Verify the expected number of secrets are in the key manager.
+        keymgr_secrets = self._get_key_mgr_secrets(self.context)
+        self.assertEqual(num_expected, len(keymgr_secrets))
+        return self.assertLibvirtSecretsMatch(
+            server, num_expected, driver, bdms=bdms)
 
     def assertLibvirtSecretsDeleted(self, bdms, driver):
         # Verify that libvirt secrets were deleted for each disk.
@@ -273,6 +279,141 @@ class EphemeralEncryptionTestCreate(EphemeralEncryptionTestBase):
 
         # Verify that secrets were deleted for each disk.
         self.assertSecretsDeleted(bdms, self.driver)
+
+    def test_create_server_with_encrypted_source_image(self):
+        """Test that encryption is maintained by default.
+
+        If the source image is encrypted and neither hw:ephemeral_encryption
+        nor hw_ephemeral_encryption have been explicitly set, we should
+        maintain encryption and create encrypted disks.
+        """
+        # Verify there are no secrets in the key manager.
+        self.assertEqual(0, len(self.key_mgr.list(self.context)))
+
+        # Simulate an encrypted image with secret ID in the image properties.
+        # First create a secret for the image.
+        secret_uuid = crypto.create_encryption_secret(
+            self.context, 'foo', 'bar')
+        image_properties = {
+            'os_encrypt_key_id': secret_uuid,
+            'os_encrypt_format': 'luks',
+        }
+        image_id = self._create_image(image_properties)['id']
+
+        # Verify there is one secret in the key manager, for the image.
+        self.assertEqual(1, len(self.key_mgr.list(self.context)))
+        # Verify there are no libvirt secrets yet.
+        self.assertEqual(0, len(self.driver._host.list_all_secrets()))
+
+        # Create a server with the image and (hw:|hw_)ephemeral_encryption is
+        # not set in the flavor or image.
+        flavor_id = self._create_flavor(disk=10, ephemeral=0, swap=0)
+        server = self._create_server(flavor_id=flavor_id, image_uuid=image_id)
+
+        # We should have created one libvirt secret for the server disk.
+        self.assertLibvirtSecretsMatch(server, 1, self.driver)
+
+        # Now delete the server.
+        self._delete_server(server)
+
+        # We should have deleted the server disk libvirt secret.
+        self.assertEqual(0, len(self.driver._host.list_all_secrets()))
+
+        # The one secret for the encrypted image should still be in the key
+        # manager.
+        self.assertEqual(1, len(self.key_mgr.list(self.context)))
+
+    def test_create_server_with_encrypted_source_image_flavor_disabled(self):
+        """Test that the source image will be decrypted if specified.
+
+        If the source image is encrypted and either hw:ephemeral_encryption
+        or hw_ephemeral_encryption have been explicitly set to false, we should
+        create unencrypted disks.
+
+        NOTE: This currently will NOT work in real life because of image cache
+        fingerprint collision.
+        """
+        # Verify there are no secrets in the key manager.
+        self.assertEqual(0, len(self.key_mgr.list(self.context)))
+
+        # Simulate an encrypted image with secret ID in the image properties.
+        # First create a secret for the image.
+        secret_uuid = crypto.create_encryption_secret(
+            self.context, 'foo', 'bar')
+        image_properties = {
+            'os_encrypt_key_id': secret_uuid,
+            'os_encrypt_format': 'luks',
+        }
+        image_id = self._create_image(image_properties)['id']
+
+        # Verify there is one secret in the key manager, for the image.
+        self.assertEqual(1, len(self.key_mgr.list(self.context)))
+        # Verify there are no libvirt secrets.
+        self.assertEqual(0, len(self.driver._host.list_all_secrets()))
+
+        # Create a server with the image and hw:ephemeral_encryption = false.
+        flavor_id = self._create_flavor(
+            disk=10, ephemeral=0, swap=0,
+            extra_spec={'hw:ephemeral_encryption': 'false'})
+        server = self._create_server(flavor_id=flavor_id, image_uuid=image_id)
+
+        # There should still be no libvirt secrets.
+        self.assertEqual(0, len(self.driver._host.list_all_secrets()))
+        # There should still be one secret in the key manager, for the image.
+        self.assertEqual(1, len(self.key_mgr.list(self.context)))
+
+        # Now delete the server.
+        self._delete_server(server)
+
+        # The one secret for the encrypted image should still be in the key
+        # manager.
+        self.assertEqual(1, len(self.key_mgr.list(self.context)))
+
+    def test_create_server_with_encrypted_source_image_also_disabled(self):
+        """Test that the source image will be decrypted if specified.
+
+        If the source image is encrypted and either hw:ephemeral_encryption
+        or hw_ephemeral_encryption have been explicitly set to false, we should
+        create unencrypted disks.
+
+        NOTE: This currently will NOT work in real life because of image cache
+        fingerprint collision.
+        """
+        # Verify there are no secrets in the key manager.
+        self.assertEqual(0, len(self.key_mgr.list(self.context)))
+
+        # Simulate an encrypted image with secret ID in the image properties.
+        # First create a secret for the image.
+        secret_uuid = crypto.create_encryption_secret(
+            self.context, 'foo', 'bar')
+        # The image properties will also request unencrypted disks.
+        image_properties = {
+            'os_encrypt_key_id': secret_uuid,
+            'os_encrypt_format': 'luks',
+            'hw_ephemeral_encryption': 'false',
+        }
+        image_id = self._create_image(image_properties)['id']
+
+        # Verify there is one secret in the key manager, for the image.
+        self.assertEqual(1, len(self.key_mgr.list(self.context)))
+        # Verify there are no libvirt secrets.
+        self.assertEqual(0, len(self.driver._host.list_all_secrets()))
+
+        # Create a server with the image.
+        flavor_id = self._create_flavor(disk=10, ephemeral=0, swap=0)
+        server = self._create_server(flavor_id=flavor_id, image_uuid=image_id)
+
+        # There should still be no libvirt secrets.
+        self.assertEqual(0, len(self.driver._host.list_all_secrets()))
+        # There should still be one secret in the key manager, for the image.
+        self.assertEqual(1, len(self.key_mgr.list(self.context)))
+
+        # Now delete the server.
+        self._delete_server(server)
+
+        # The one secret for the encrypted image should still be in the key
+        # manager.
+        self.assertEqual(1, len(self.key_mgr.list(self.context)))
 
 
 class EphemeralEncryptionTestResize(EphemeralEncryptionTestBase):

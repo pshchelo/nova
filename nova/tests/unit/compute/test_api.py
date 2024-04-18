@@ -6317,12 +6317,8 @@ class _ComputeAPIUnitTestMixIn(object):
                                  'volume_id': 'volume_id'}]
         self._test_check_and_transform_bdm(block_device_mapping)
 
-    def test_update_ephemeral_encryption_bdms(self):
-        flavor = self._create_flavor(
-            extra_specs={
-                'hw:ephemeral_encryption': True,
-            }
-        )
+    def _test_update_image_meta_and_ephemeral_encryption_bdms(
+            self, flavor, image_meta):
         block_device_mapping = [
                 {'device_name': '/dev/sda1',
                  'source_type': 'snapshot', 'destination_type': 'volume',
@@ -6342,14 +6338,37 @@ class _ComputeAPIUnitTestMixIn(object):
                     map(fake_block_device.AnonFakeDbBlockDeviceDict,
                         block_device_mapping)))
 
-        self.compute_api._update_ephemeral_encryption_bdms(
-            flavor, {}, block_device_mapping)
+        self.compute_api._update_image_meta_and_ephemeral_encryption_bdms(
+            flavor, image_meta, block_device_mapping)
 
         for bdm in block_device_mapping:
             if bdm.is_local:
                 self.assertTrue(bdm.encrypted)
             else:
                 self.assertFalse(bdm.encrypted)
+
+    def test_update_image_meta_and_ephemeral_encryption_bdms(self):
+        flavor = self._create_flavor(
+            extra_specs={
+                'hw:ephemeral_encryption': True,
+            }
+        )
+        self._test_update_image_meta_and_ephemeral_encryption_bdms(
+                flavor, {'properties': {}})
+
+    def test_update_image_meta_and_ephemeral_encryption_bdms_implied(self):
+        # Test that we will default to encrypted when the source image is
+        # encrypted and (hw:|hw_)ephemeral_encryption is not set.
+        flavor = self._create_flavor()
+        image_meta = {
+            'properties': {
+                'os_encrypt_key_id': uuids.secret,
+                'os_encrypt_format': 'luks',
+            }
+        }
+        self._test_update_image_meta_and_ephemeral_encryption_bdms(
+            flavor, image_meta)
+        self.assertTrue(image_meta['properties']['hw_ephemeral_encryption'])
 
     def test_bdm_validate_set_size_and_instance(self):
         swap_size = 42
@@ -8840,3 +8859,15 @@ class ComputeAPIUnitTestCase(_ComputeAPIUnitTestMixIn, test.NoDBTestCase):
             self.assertRaises(exception.VTPMOldCompute,
                               fake_compute_api_method, self.compute_api,
                               self.context, instance)
+
+    def test_validate_image_ephemeral_encryption(self):
+        # Encryption secret UUID without format should fail.
+        image_properties = {'os_encrypt_key_id': uuids.secret}
+        self.assertRaises(
+            exception.ImageUnacceptable,
+            self.compute_api._validate_image_ephemeral_encryption,
+            image_properties, {'id': uuids.image})
+        # Adding format should succeed.
+        image_properties['os_encrypt_format'] = 'luks'
+        self.compute_api._validate_image_ephemeral_encryption(
+            image_properties, {'id': uuids.image})

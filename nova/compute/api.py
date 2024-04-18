@@ -834,6 +834,25 @@ class API:
                                               reason=reason)
 
     @staticmethod
+    def _validate_image_ephemeral_encryption(image_properties, image):
+        # If os_encrypt_key_id is set, require that os_encrypt_format also be
+        # set. We want to be able to assume we know the format explicitly if a
+        # secret UUID is being provided.
+        secret_uuid_value = image_properties.get('os_encrypt_key_id')
+        format_value = image_properties.get('os_encrypt_format')
+        if secret_uuid_value and not format_value:
+            reason = _(
+                'If os_encrypt_key_id is set in image properties, then '
+                'os_encrypt_format must also be set')
+            raise exception.ImageUnacceptable(
+                image_id=image.get('id', ''), reason=reason)
+        # If the image is encrypted, the image size reported by glance
+        # could be larger than the disk size requested in the flavor
+        # due to overhead such as the encryption header.
+        # Return overhead based on whether there is encryption.
+        return 0 if not secret_uuid_value else 1 * units.Gi
+
+    @staticmethod
     def _validate_flavor_image_nostatus(
         context, image, flavor, root_bdm, validate_numa=True,
         validate_pci=False,
@@ -932,6 +951,9 @@ class API:
             # since libvirt interpreted the value differently than other
             # drivers. A value of 0 means don't check size.
             if dest_size != 0:
+                API._validate_image_ephemeral_encryption(
+                    image_properties, image)
+
                 if image_size > dest_size:
                     raise exception.FlavorDiskSmallerThanImage(
                         flavor_size=dest_size, image_size=image_size)
@@ -1716,7 +1738,7 @@ class API:
 
         return objects.InstanceGroup.get_by_uuid(context, group_hint)
 
-    def _update_ephemeral_encryption_bdms(
+    def _update_image_meta_and_ephemeral_encryption_bdms(
         self,
         flavor: 'objects.Flavor',
         image_meta_dict: dict[str, ty.Any],
@@ -1732,6 +1754,21 @@ class API:
         :param image_meta_dict: The image metadata for the request
         :block_device_mapping: The current block_device_mapping for the request
         """
+        # NOTE(melwitt): If this image is encrypted and
+        # (hw*|hw_)ephemeral_encryption was not explicitly set, we will
+        # consider the image as having requested encryption. The intention is
+        # to avoid silently decrypting data by taking an encrypted image and
+        # producing unencrypted disks from it without clear indication to do
+        # so.
+        # In this case, we add hw_ephemeral_encryption to the image meta dict
+        # and the contents will be stored in Instance.system_metadata and the
+        # RequestSpec later in the server create|rebuild path.
+        image_properties = image_meta_dict.get('properties', {})
+        if ('os_encrypt_key_id' in image_properties and
+                'hw_ephemeral_encryption' not in image_properties and
+                'hw:ephemeral_encryption' not in flavor.extra_specs):
+            image_properties['hw_ephemeral_encryption'] = True
+
         image_meta = _get_image_meta_obj(image_meta_dict)
         if not hardware.get_ephemeral_encryption_constraint(
                 flavor, image_meta):
@@ -1743,6 +1780,7 @@ class API:
         # TODO(lyarwood): Add .get_local_devices() to BlockDeviceMappingList
         for bdm in [b for b in block_device_mapping if b.is_local]:
             bdm.encrypted = True
+            bdm.encryption_format = image_meta_dict.get('os_encrypt_format')
 
     def _create_instance(self, context, flavor,
                image_href, kernel_id, ramdisk_id,
@@ -1837,7 +1875,7 @@ class API:
 
         # Update any local BlockDeviceMapping objects if ephemeral encryption
         # has been requested though flavor extra specs or image properties
-        self._update_ephemeral_encryption_bdms(
+        self._update_image_meta_and_ephemeral_encryption_bdms(
             flavor, boot_meta, block_device_mapping)
 
         # We can't do this check earlier because we need bdms from all sources
@@ -3863,7 +3901,8 @@ class API:
                 context, instance, flavor, image, bdms)
             # Update any local BlockDeviceMapping objects if ephemeral
             # encryption has been requested though image properties
-            self._update_ephemeral_encryption_bdms(flavor, image, bdms)
+            self._update_image_meta_and_ephemeral_encryption_bdms(
+                flavor, image, bdms)
 
         kernel_id, ramdisk_id = self._handle_kernel_and_ramdisk(
                 context, None, None, image)

@@ -891,7 +891,8 @@ class Lvm(Image):
             # ephemeral filesystem locally, we just don't know here. Having
             # audited this, all current sources have been sanity checked,
             # either because they're locally generated, or because they have
-            # come from images.fetch_to_raw. However, this is major code smell.
+            # come from images.fetch_to_flat. However, this is major code
+            # smell.
             images.convert_image_unsafe(base, self.path, self.driver_format,
                                         run_as_root=True)
             if resize:

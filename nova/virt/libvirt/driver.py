@@ -171,6 +171,12 @@ class InjectionInfo(collections.namedtuple(
                 'admin_pass=<SANITIZED>)') % (self.network_info, self.files)
 
 
+class EncryptionInfo(ty.TypedDict):
+    secret: str
+    format: str
+    details: 'objects.EncryptDetails'
+
+
 # NOTE(lyarwood): Dict of volume drivers supported by the libvirt driver, keyed
 # by the connection_info['driver_volume_type'] returned by Cinder for each
 # volume type it supports
@@ -5236,7 +5242,8 @@ class LibvirtDriver(driver.ComputeDriver):
     def _create_ephemeral(target, ephemeral_size,
                           fs_label, os_type, is_block_dev=False,
                           context=None, specified_fs=None,
-                          vm_mode=None):
+                          vm_mode=None, src_encryption=None,
+                          dest_encryption=None):
         if not is_block_dev:
             if (CONF.libvirt.virt_type == "parallels" and
                     vm_mode == fields.VMMode.EXE):
@@ -5253,7 +5260,8 @@ class LibvirtDriver(driver.ComputeDriver):
                       specified_fs=specified_fs)
 
     @staticmethod
-    def _create_swap(target, swap_mb, context=None):
+    def _create_swap(target, swap_mb, context=None, src_encryption=None,
+                     dest_encryption=None):
         """Create a swap file of specified size."""
         libvirt_utils.create_image(target, 'raw', f'{swap_mb}M')
         nova.privsep.fs.unprivileged_mkfs('swap', target)
@@ -5569,8 +5577,11 @@ class LibvirtDriver(driver.ComputeDriver):
             if instance.task_state == task_states.RESIZE_FINISH:
                 backend.create_snap(libvirt_utils.RESIZE_SNAPSHOT_NAME)
             if backend.SUPPORTS_CLONE:
+                # This function is used as a fetch_func, so its signature needs
+                # to support the encryption keyword arguments.
                 def clone_fallback_to_fetch(
                     context, target, image_id, trusted_certs=None,
+                    src_encryption=None, dest_encryption=None
                 ):
                     refuse_fetch = (
                         CONF.libvirt.images_type == 'rbd' and
@@ -5592,6 +5603,8 @@ class LibvirtDriver(driver.ComputeDriver):
                                     disk_images['image_id'])
                         libvirt_utils.fetch_image(
                             context, target, image_id, trusted_certs,
+                            src_encryption=src_encryption,
+                            dest_encryption=dest_encryption,
                         )
                 fetch_func = clone_fallback_to_fetch
             else:
@@ -12307,16 +12320,64 @@ class LibvirtDriver(driver.ComputeDriver):
 
         return migrate_data
 
+    def _get_ephemeral_encryption_from_image(
+            self,
+            context: nova_context.RequestContext,
+            image_id: str,
+            instance: 'objects.Instance',
+    ) -> ty.Optional[EncryptionInfo]:
+        # If the image properties contained an ephemeral encryption secret UUID
+        # for the encrypted image, we retrieve it from the image if it's
+        # different than the base_image_ref. We don't use the image metadata
+        # from the instance system metadata in that case because that refers to
+        # the original image from which the instance was created, which is not
+        # necessarily the image we are creating from now (example: unshelve).
+        base_image_ref = instance.system_metadata.get('image_base_image_ref')
+        if image_id != base_image_ref:
+            image_meta = objects.ImageMeta.from_image_ref(
+                context, self._image_api, image_id)
+        else:
+            image_meta = objects.ImageMeta.from_instance(instance)
+        secret_uuid = image_meta.properties.get('os_encrypt_key_id')
+
+        image_encryption: ty.Optional[EncryptionInfo] = None
+        if secret_uuid:
+            LOG.debug(
+                f'Fetching image with encryption secret UUID {secret_uuid}',
+                instance=instance)
+            secret = crypto.get_encryption_secret(context, secret_uuid)
+            if secret is None:
+                msg = (
+                    f'Failed to find encryption secret {secret_uuid} in the '
+                    f'key manager for image {image_id}')
+                raise exception.EphemeralEncryptionSecretNotFound(msg)
+            encryption_format = image_meta.properties.get('os_encrypt_format')
+            if not encryption_format:
+                msg = _(
+                    'If os_encrypt_key_id is set in image properties, then '
+                    'os_encrypt_format must also be set')
+                raise exception.ImageUnacceptable(
+                    reason=msg, image_id=image_id)
+            image_encryption = {
+                'secret': secret,
+                'format': encryption_format,
+                'details': None,
+            }
+        return image_encryption
+
     def _try_fetch_image_cache(self, image, fetch_func, context, filename,
                                image_id, instance, size,
                                fallback_from_host=None):
+        image_encryption = self._get_ephemeral_encryption_from_image(
+            context, image_id, instance)
         try:
             image.cache(fetch_func=fetch_func,
                         context=context,
                         filename=filename,
                         image_id=image_id,
                         size=size,
-                        trusted_certs=instance.trusted_certs)
+                        trusted_certs=instance.trusted_certs,
+                        src_encryption=image_encryption)
         except exception.ImageNotFound:
             if not fallback_from_host:
                 raise
@@ -12326,11 +12387,16 @@ class LibvirtDriver(driver.ComputeDriver):
                       {'image_id': image_id, 'host': fallback_from_host},
                       instance=instance)
 
-            def copy_from_host(target, context=None):
+            def copy_from_host(target, context=None, src_encryption=None,
+                               dest_encryption=None):
                 """Fetch function for a copy from host fallback.
 
-                The 'context' keyword argument is not used here but as a fetch
-                func, we need the signature match all other fetch funcs.
+                The 'context', 'src_encryption', and 'dest_encryption' keyword
+                arguments are not used here but as a fetch func, we need the
+                signature match all other fetch funcs.
+
+                Other fetch_func such as fetch_image will need encryption info
+                to convert encrypted images.
                 """
                 libvirt_utils.copy_image(src=target,
                                          dest=target,
@@ -12872,10 +12938,10 @@ class LibvirtDriver(driver.ComputeDriver):
             # creating at the time, but relies on the
             # compute_utils.disk_ops_semaphore for cache fetch mutual
             # exclusion, which is grabbed in images.fetch() (which is called
-            # by images.fetch_to_raw() below). So, by calling fetch_to_raw(),
+            # by images.fetch_to_flat() below). So, by calling fetch_to_flat(),
             # we are sharing the same locking for the cache fetch as the
             # rest of the code currently called only from spawn().
-            images.fetch_to_raw(context, image_id, path)
+            images.fetch_to_flat(context, image_id, path)
             return True
 
     def _get_disk_size_reserved_for_image_cache(self):

@@ -415,7 +415,7 @@ class LibvirtUtilsTestCase(test.NoDBTestCase):
         self.assertEqual(3686400, fs_info['free'])
         self.assertEqual(4096000, fs_info['used'])
 
-    @mock.patch('nova.virt.images.fetch_to_raw')
+    @mock.patch('nova.virt.images.fetch_to_flat')
     def test_fetch_image(self, mock_images):
         context = 'opaque context'
         target = '/tmp/targetfile'
@@ -425,7 +425,8 @@ class LibvirtUtilsTestCase(test.NoDBTestCase):
                  '674736e3-f25c-405c-8362-bbf991e0ce0a'])
         libvirt_utils.fetch_image(context, target, image_id, trusted_certs)
         mock_images.assert_called_once_with(
-            context, image_id, target, trusted_certs)
+            context, image_id, target, trusted_certs, src_encryption=None,
+            dest_encryption=None)
 
     @mock.patch('nova.virt.images.fetch')
     def test_fetch_initrd_image(self, mock_images):
@@ -509,7 +510,7 @@ class LibvirtUtilsTestCase(test.NoDBTestCase):
         self.executes = []
         expected_commands = [('rm', 't.qcow2.part'),
                              ('mv', 't.qcow2.converted', 't.qcow2')]
-        images.fetch_to_raw(context, image_id, target)
+        images.fetch_to_flat(context, image_id, target)
         self.assertEqual(self.executes, expected_commands)
         mock_disk_op_sema.__enter__.assert_called_once()
         mock_convert_image.assert_called_with(
@@ -529,7 +530,7 @@ class LibvirtUtilsTestCase(test.NoDBTestCase):
         target = 't.raw'
         self.executes = []
         expected_commands = [('mv', 't.raw.part', 't.raw')]
-        images.fetch_to_raw(context, image_id, target)
+        images.fetch_to_flat(context, image_id, target)
         self.assertEqual(self.executes, expected_commands)
         mock_convert_image.assert_not_called()
         mock_inspector.safety_check.assert_called_once_with()
@@ -545,7 +546,7 @@ class LibvirtUtilsTestCase(test.NoDBTestCase):
         self.executes = []
         expected_commands = [('rm', '-f', 'backing.qcow2.part')]
         self.assertRaises(exception.ImageUnacceptable,
-                          images.fetch_to_raw, context, image_id, target)
+                          images.fetch_to_flat, context, image_id, target)
         self.assertEqual(self.executes, expected_commands)
         mock_convert_image.assert_not_called()
         mock_inspector.safety_check.assert_called_once_with()
@@ -561,7 +562,7 @@ class LibvirtUtilsTestCase(test.NoDBTestCase):
         self.executes = []
         expected_commands = [('rm', '-f', 'backing.qcow2.part')]
         self.assertRaises(exception.ImageUnacceptable,
-                          images.fetch_to_raw, context, image_id, target)
+                          images.fetch_to_flat, context, image_id, target)
         self.assertEqual(self.executes, expected_commands)
         mock_convert_image.assert_not_called()
         mock_inspector.safety_check.assert_called_once_with()
