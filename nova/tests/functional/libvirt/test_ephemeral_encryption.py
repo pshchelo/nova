@@ -10,12 +10,16 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+from unittest import mock
+
+from castellan.common import exception as castellan_exception
 from oslo_log import log as logging
 
 import nova.conf
 from nova import context as nova_context
 from nova import crypto
 from nova import objects
+from nova.tests.functional.api import client as api_client
 from nova.tests.functional.libvirt import base
 from nova import utils
 
@@ -137,3 +141,31 @@ class EphemeralEncryptionTestCreate(EphemeralEncryptionTestBase):
         # Verify that all secrets including the libvirt secrets were deleted
         # for each disk.
         self.assertSecretsDeleted(bdms)
+
+    def test_create_server_without_key_access(self):
+        # We will do the early API check for key access if we expect a fair
+        # chance that a secret create would fail. The 'creator' role is the
+        # default policy check in the key manager service when
+        # enforce_scope=False. When enforce_scope=True, the 'creator' role is
+        # not needed.
+        self.flags(enforce_scope=False, group='oslo_policy')
+        self.api.roles = ['member']
+
+        # Verify there are no secrets in the key manager.
+        self.assertEqual(0, len(self.key_mgr.list(self.context)))
+
+        with mock.patch(
+                'castellan.tests.unit.key_manager.mock_key_manager.'
+                'MockKeyManager.store') as mock_store:
+            # Simulate a key access permission error when checking in the API.
+            mock_store.side_effect = castellan_exception.KeyManagerError(
+                'Forbidden')
+            # Create a server with ephemeral encryption.
+            ex = self.assertRaises(
+                api_client.OpenStackApiException,
+                self._create_server_with_ephemeral_encryption_flavor)
+            # The request should fail with a 403 error Forbidden.
+            self.assertEqual(403, ex.response.status_code)
+            self.assertRegex(
+                ex.response.text,
+                'Failed to create encryption secret.*Forbidden')

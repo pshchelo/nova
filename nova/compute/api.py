@@ -21,6 +21,7 @@ networking and storage of VMs, and compute hosts on which they run)."""
 
 import collections
 from collections.abc import Mapping
+import configparser
 import functools
 import re
 import typing as ty
@@ -364,6 +365,45 @@ def reject_ephemeral_encryption_instances(operation):
             return f(self, context, instance, *args, **kw)
         return inner
     return outer
+
+
+def check_ephemeral_encryption_key_access(ctxt, flavor, image_meta):
+    if hardware.get_ephemeral_encryption_constraint(flavor, image_meta):
+        # NOTE(melwitt): Verifying key creation access is expensive, so only
+        # check for it if we have reason to believe key creation might fail.
+        #
+        # First, try to get the policy enforce_scope setting from the key
+        # manager service config file default path.
+        barbican_enforce_scope = None
+        barbican_conf = configparser.RawConfigParser()
+        try:
+            barbican_conf.read_file(open('/etc/barbican/barbican.conf'))
+            if barbican_conf.has_option('oslo_policy', 'enforce_scope'):
+                barbican_enforce_scope = strutils.bool_from_string(
+                    barbican_conf.get('oslo_policy', 'enforce_scope'))
+        except FileNotFoundError:
+            pass
+
+        if barbican_enforce_scope is None:
+            # If we couldn't find the policy enforce_scope setting from the key
+            # manager service config, try to infer the setting from the Nova
+            # config.
+            enforce_scope = CONF.oslo_policy.enforce_scope
+        else:
+            enforce_scope = barbican_enforce_scope
+
+        if not enforce_scope and 'creator' not in ctxt.roles:
+            # We have to actually try to create a secret to test access. The
+            # GET /secrets API allows pretty much all users.
+            try:
+                secret_uuid = crypto.create_encryption_secret(
+                    ctxt, 'test',
+                    '[nova] verifying key access for ephemeral encryption')
+            except exception.EncryptionSecretCreateFailed as e:
+                msg = str(e)
+                if 'forbidden' in msg.lower():
+                    raise exception.EncryptionSecretCreateForbidden(msg)
+            crypto.delete_encryption_secret(ctxt, 'N/A', secret_uuid)
 
 
 def load_cells():
@@ -1734,6 +1774,8 @@ class API:
 
         if image_href:
             image_id, boot_meta = self._get_image(context, image_href)
+            check_ephemeral_encryption_key_access(
+                context, flavor, _get_image_meta_obj(boot_meta))
         else:
             # This is similar to the logic in _retrieve_trusted_certs_object.
             if (trusted_certs or

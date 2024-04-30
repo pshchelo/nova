@@ -2669,6 +2669,12 @@ class EncryptionSecretCreateFailed(NovaException):
         'Failed to create encryption secret with name "%(name)s": %(error)s')
 
 
+class EncryptionSecretCreateForbidden(Forbidden):
+    msg_fmt = _(
+        'The user does not have permission to create an encryption secret in '
+        'the key manager service.')
+
+
 class HostConflict(Exception):
     pass
 
