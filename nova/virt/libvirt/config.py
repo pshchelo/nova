@@ -24,6 +24,7 @@ helpers for populating up config object instances.
 """
 
 import time
+import typing as ty
 
 from collections import OrderedDict
 from lxml import etree
@@ -109,6 +110,10 @@ class LibvirtConfigObject(object):
             raise exception.InvalidInput(msg % {'value': value})
 
         return value == 'on'
+
+    @classmethod
+    def parse_yes_no_str(self, value: ty.Optional[str]) -> bool:
+        return strutils.bool_from_string(value)
 
     @classmethod
     def get_yes_no_str(self, value: bool) -> str:
@@ -4054,6 +4059,22 @@ class LibvirtConfigSecret(LibvirtConfigObject):
             usage.append(self._text_node('volume', str(self.usage_id)))
         root.append(usage)
         return root
+
+    def parse_dom(self, xmldoc):
+        super().parse_dom(xmldoc)
+        self.ephemeral = self.parse_yes_no_str(xmldoc.get('ephemeral'))
+        self.private = self.parse_yes_no_str(xmldoc.get('private'))
+
+        for c in list(xmldoc):
+            if c.tag == 'description':
+                self.description = c.text
+            elif c.tag == 'uuid':
+                self.uuid = c.text
+            elif c.tag == 'usage':
+                self.usage_type = c.get('type')
+                for sub in list(c):
+                    if sub.tag in ('name', 'target', 'volume'):
+                        self.usage_id = sub.text
 
 
 class LibvirtConfigGuestVPMEM(LibvirtConfigGuestDevice):

@@ -1094,8 +1094,16 @@ class HostTestCase(test.NoDBTestCase):
 
         secret = mock.MagicMock()
         mock_sec.return_value = secret
-        self.host.create_secret('iscsi', 'iscsivol', password="foo")
+        self.host.create_secret(
+            'iscsi', 'iscsivol', password="foo", description="bar")
         secret.setValue.assert_called_once_with("foo")
+        xmlstr = mock_sec.call_args.args[0]
+        print(xmlstr)
+        conf = vconfig.LibvirtConfigSecret()
+        conf.parse_str(xmlstr)
+        self.assertEqual("iscsi", conf.usage_type)
+        self.assertEqual("iscsivol", conf.usage_id)
+        self.assertEqual("bar", conf.description)
 
     @mock.patch.object(fakelibvirt.virConnect, "secretDefineXML")
     def test_create_secret_vtpm_ephemeral_private_default(self, mock_sec):

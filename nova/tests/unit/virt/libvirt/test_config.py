@@ -4824,6 +4824,15 @@ class LibvirtConfigSecretTest(LibvirtConfigBaseTest):
 
         self.assertXmlEqual(expected_xml, xml)
 
+        obj = config.LibvirtConfigSecret()
+        obj.parse_str(expected_xml)
+        self.assertFalse(obj.ephemeral)
+        self.assertFalse(obj.private)
+        self.assertEqual('sample desc', obj.description)
+        self.assertEqual('c7a5fdbd-edaf-9455-926a-d65c16db1809', obj.uuid)
+        self.assertEqual('volume', obj.usage_type)
+        self.assertEqual('sample_volume', obj.usage_id)
+
     def test_config_secret_ceph(self):
         secret = config.LibvirtConfigSecret()
         secret.ephemeral = False

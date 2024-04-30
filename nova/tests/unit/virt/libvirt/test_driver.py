@@ -21579,7 +21579,7 @@ class LibvirtConnTestCase(test.NoDBTestCase,
         # we should also have created the secret...
         drvr._host.create_secret.assert_called_once_with(
             'vtpm', instance.uuid, password='passphrase',
-            uuid=uuids.fake_secret)
+            uuid=uuids.fake_secret, description=None)
         # ...and undefined it after
         drvr._host.create_secret.return_value.undefine.assert_called_once()
 
@@ -21618,7 +21618,7 @@ class LibvirtConnTestCase(test.NoDBTestCase,
         # we should also have created the secret...
         drvr._host.create_secret.assert_called_once_with(
             'vtpm', instance.uuid, password='passphrase',
-            uuid=uuids.fake_secret)
+            uuid=uuids.fake_secret, description=None)
         # ...and undefined it after, despite the error
         drvr._host.create_secret.return_value.undefine.assert_called_once()
 
@@ -21665,7 +21665,8 @@ class LibvirtConnTestCase(test.NoDBTestCase,
         # ensure_vtpm_secret() returns (secret_uuid, passphrase)
         mock_host.return_value.create_secret.assert_called_once_with(
             'vtpm', uuids.instance, password=mock.sentinel.passphrase,
-            uuid=uuids.secret, ephemeral=False, private=False)
+            uuid=uuids.secret, ephemeral=False, private=False,
+            description=None)
 
         self.assertEqual(
             mock_host.return_value.create_secret.return_value, secret)

@@ -8328,7 +8328,7 @@ class LibvirtDriver(driver.ComputeDriver):
                     context, instance)
             libvirt_secret = self._host.create_secret(
                 'vtpm', instance.uuid, password=passphrase, uuid=secret_uuid,
-                **kwargs)
+                description=None, **kwargs)
 
         return libvirt_secret, security
 
