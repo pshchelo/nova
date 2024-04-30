@@ -14,6 +14,7 @@ from unittest import mock
 
 from castellan.common import exception as castellan_exception
 from oslo_log import log as logging
+from oslo_utils.fixture import uuidsentinel as uuids
 
 import nova.conf
 from nova import context as nova_context
@@ -140,6 +141,58 @@ class EphemeralEncryptionTestCreate(EphemeralEncryptionTestBase):
 
         # Verify that all secrets including the libvirt secrets were deleted
         # for each disk.
+        self.assertSecretsDeleted(bdms)
+
+    def test_create_server_with_init_host_cleanup(self):
+        # Verify there are no secrets in the key manager.
+        self.assertEqual(0, len(self.key_mgr.list(self.context)))
+
+        # Create a server with ephemeral encryption.
+        server = self._create_server_with_ephemeral_encryption_flavor()
+
+        # There should be three secrets in the key manager, one for the root
+        # disk, one for the ephemeral disk, and one for the swap disk.
+        bdms = self.assertSecretsMatch(server, 3)
+
+        # There should be three libvirt secrets total currently.
+        self.assertEqual(3, len(self.driver._host.list_all_secrets()))
+
+        # Add a few fake unused secrets to test cleanup during init_host().
+        self.driver._host.create_secret(
+            'volume', 'fake1', password='pass1', uuid=uuids.fake1,
+            description='Ephemeral encryption secret 1')
+        self.driver._host.create_secret(
+            'volume', 'fake2', password='pass2', uuid=uuids.fake2,
+            description='Ephemeral encryption secret 2')
+        # Make one secret for something other than ephemeral encryption. It
+        # should not be cleaned up.
+        self.driver._host.create_secret(
+            'volume', 'fake3', password='pass3', uuid=uuids.fake3)
+
+        # There should be six libvirt secrets total now.
+        self.assertEqual(6, len(self.driver._host.list_all_secrets()))
+
+        # And still three key manager secrets.
+        self.assertEqual(3, len(self.key_mgr.list(self.context)))
+
+        # Restart the compute host to make init_host() run.
+        self.restart_compute_service('compute1')
+
+        # There should only be four libvirt secrets after cleaning the unused
+        # secrets (one of them is a secret unrelated to ephemeral encryption).
+        self.assertEqual(4, len(self.driver._host.list_all_secrets()))
+
+        # And the secrets for the server we have should still be present.
+        self.assertSecretsMatch(server, 3)
+
+        # The unrelated secret should also still be present.
+        unrelated_secret = self.driver._host.find_secret('volume', 'fake3')
+        self.assertEqual('fake3', unrelated_secret.usageID())
+
+        # Now delete the server.
+        self._delete_server(server)
+
+        # Verify that secrets were deleted for each disk.
         self.assertSecretsDeleted(bdms)
 
     def test_create_server_without_key_access(self):

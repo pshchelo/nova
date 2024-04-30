@@ -918,10 +918,14 @@ class LibvirtDriver(driver.ComputeDriver):
         # Even if we already checked the whitelist at startup, this driver
         # needs to check specific hypervisor versions
         self._check_pci_whitelist()
+        # Get a list of instances on this host for methods that need it.
+        instances = self._get_instances_on_host()
 
         # Set REGISTER_IMAGE_PROPERTY_DEFAULTS in the instance system_metadata
         # to default values for properties that have not already been set.
-        self._register_all_undefined_instance_details()
+        self._register_all_undefined_instance_details(instances)
+
+        self._cleanup_unused_ephemeral_encryption_secrets(instances)
 
     def _check_pci_whitelist(self):
 
@@ -975,7 +979,14 @@ class LibvirtDriver(driver.ComputeDriver):
             'supports_stateless_firmware': supports_stateless_firmware,
         })
 
-    def _register_all_undefined_instance_details(self) -> None:
+    def _get_instances_on_host(self) -> 'objects.InstanceList':
+        context = nova_context.get_admin_context()
+        hostname = self._host.get_hostname()
+        return objects.InstanceList.get_by_host(
+            context, hostname, expected_attrs=['flavor', 'system_metadata'])
+
+    def _register_all_undefined_instance_details(
+            self, instances: 'objects.InstanceList') -> None:
         """Register the default image properties of instances on this host
 
         For each instance found on this host by InstanceList.get_by_host ensure
@@ -983,10 +994,7 @@ class LibvirtDriver(driver.ComputeDriver):
         metadata of the instance
         """
         context = nova_context.get_admin_context()
-        hostname = self._host.get_hostname()
-        for instance in objects.InstanceList.get_by_host(
-            context, hostname, expected_attrs=['flavor', 'system_metadata']
-        ):
+        for instance in instances:
             try:
                 self._register_undefined_instance_details(context, instance)
             except Exception:
@@ -1876,6 +1884,45 @@ class LibvirtDriver(driver.ComputeDriver):
                     LOG.exception(msg, instance=instance)
                     exception_msgs.append(msg)
 
+        if exception_msgs:
+            msg = '\n'.join(exception_msgs)
+            raise exception.EphemeralEncryptionCleanupFailed(error=msg)
+
+    def _cleanup_unused_ephemeral_encryption_secrets(self, instances):
+        # First make a list of the guest secrets that are in use on this host.
+        bdms = objects.BlockDeviceMappingList()
+        for instance in instances:
+            if hardware.get_ephemeral_encryption_constraint(
+                    instance.flavor, instance.image_meta):
+                bdms += instance.get_bdms()
+        secret_uuids_in_use = set()
+        for bdm in bdms:
+            if ('encryption_secret_uuid' in bdm and
+                    bdm.encryption_secret_uuid is not None):
+                secret_uuids_in_use.add(bdm.encryption_secret_uuid)
+        # Then get a list of all secrets on the host and delete any that are
+        # not in use by guests on this host.
+        exception_msgs = []
+        secrets = self._host.list_all_secrets()
+        for secret in secrets:
+            config = vconfig.LibvirtConfigSecret()
+            config.parse_str(secret.XMLDesc(0))
+
+            if (config.description is not None and
+                    config.description.startswith('Ephemeral encryption') and
+                        config.uuid not in secret_uuids_in_use):
+                LOG.info(
+                    f'Cleaning up unused libvirt secret {config.uuid} with '
+                    f'usage: {config.usage_id} and description: '
+                    f'{config.description}')
+                try:
+                    self._host.delete_secret('volume', config.usage_id)
+                except libvirt.libvirtError as e:
+                    msg = (
+                        f'Failed to delete libvirt secret {config.usage_id}: '
+                        f'{str(e)}')
+                    LOG.exception(msg)
+                    exception_msgs.append(msg)
         if exception_msgs:
             msg = '\n'.join(exception_msgs)
             raise exception.EphemeralEncryptionCleanupFailed(error=msg)

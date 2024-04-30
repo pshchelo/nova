@@ -1060,6 +1060,19 @@ class HostTestCase(test.NoDBTestCase):
         self.assertEqual(1005001, self.host.get_version())
         mock_version.assert_called_once_with()
 
+    @mock.patch('nova.virt.libvirt.host.LOG.warning')
+    @mock.patch.object(host.Host, "get_connection")
+    def test_list_all_secrets(self, mock_conn, mock_log_warning):
+        self.host.list_all_secrets()
+        self.host.list_all_secrets(flags=1)
+        self.assertEqual(
+            [mock.call(0), mock.call(1)],
+            mock_conn.return_value.listAllSecrets.mock_calls)
+        mock_conn.return_value.listAllSecrets.side_effect = (
+            fakelibvirt.libvirtError("oops!"))
+        self.assertEqual([], self.host.list_all_secrets())
+        mock_log_warning.assert_called_once_with("oops!")
+
     @mock.patch.object(fakelibvirt.virConnect, "secretLookupByUsage")
     def test_find_secret(self, mock_sec):
         """finding secrets with various usage_type."""
