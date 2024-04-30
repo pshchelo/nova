@@ -1386,12 +1386,30 @@ class Domain(object):
                         error_code=VIR_ERR_CONFIG_UNSUPPORTED,
                         error_domain=VIR_FROM_DOMAIN)
 
+    def verify_encryption_secrets_exist(self):
+        msg = 'virDomainCreateWithFlags() failed'
+
+        disks = self._def['devices'].get('disks', [])
+        for disk in disks:
+            secret = disk.get('encryption_secret')
+            if secret and secret not in self._connection._secrets:
+                error_message = (
+                    "Secret not found: "
+                    f"no secret with matching uuid '{secret}'")
+                raise make_libvirtError(
+                    libvirtError,
+                    msg,
+                    error_code=VIR_ERR_NO_SECRET,
+                    error_domain=VIR_FROM_DOMAIN,
+                    error_message=error_message)
+
     def create(self):
         self.createWithFlags(0)
 
     def createWithFlags(self, flags):
         # FIXME: Not handling flags at the moment
         self.verify_hostdevs_interface_are_vfs()
+        self.verify_encryption_secrets_exist()
         self._state = VIR_DOMAIN_RUNNING
         self._connection._mark_running(self)
         self._has_saved_state = False

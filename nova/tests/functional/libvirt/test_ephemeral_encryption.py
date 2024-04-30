@@ -222,3 +222,42 @@ class EphemeralEncryptionTestCreate(EphemeralEncryptionTestBase):
             self.assertRegex(
                 ex.response.text,
                 'Failed to create encryption secret.*Forbidden')
+
+    def test_create_server_with_guest_launch_auto_heal_libvirt_secrets(self):
+        # Verify there are no secrets in the key manager.
+        self.assertEqual(0, len(self.key_mgr.list(self.context)))
+
+        # Create a server with ephemeral encryption.
+        server = self._create_server_with_ephemeral_encryption_flavor()
+
+        # There should be three secrets in the key manager, one for the root
+        # disk, one for the ephemeral disk, and one for the swap disk.
+        bdms = self.assertSecretsMatch(server, 3)
+
+        # There should be three libvirt secrets total currently.
+        self.assertEqual(3, len(self.driver._host.list_all_secrets()))
+
+        # Delete the libvirt secrets so we can test the auto healing.
+        for bdm in bdms:
+            secret_usage = f"{bdm.instance_uuid}_{bdm.uuid}"
+            self.driver._host.delete_secret('volume', secret_usage)
+
+        # Verify the libvirt secrets are gone.
+        self.assertEqual(0, len(self.driver._host.list_all_secrets()))
+
+        # The key manager secrets should still be present.
+        self.assertEqual(3, len(self.key_mgr.list(self.context)))
+
+        # Try to hard reboot the server (this would normally fail if any
+        # libvirt secret is missing).
+        self._reboot_server(server, hard=True)
+
+        # The libvirt secrets should have been recreated based on the key
+        # manager secrets.
+        self.assertSecretsMatch(server, 3)
+
+        # Now delete the server.
+        self._delete_server(server)
+
+        # Verify that secrets were deleted for each disk.
+        self.assertSecretsDeleted(bdms)
