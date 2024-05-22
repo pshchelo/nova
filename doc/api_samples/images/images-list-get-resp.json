@@ -170,44 +170,6 @@
                 }
             ],
             "name": "fakeimage123456"
-        },
-        {
-            "id": "54eadb78-eeb6-4b13-beed-20b9894eeadf",
-            "links": [
-                {
-                    "href": "http://openstack.example.com/v2/6f70656e737461636b20342065766572/images/54eadb78-eeb6-4b13-beed-20b9894eeadf",
-                    "rel": "self"
-                },
-                {
-                    "href": "http://openstack.example.com/6f70656e737461636b20342065766572/images/54eadb78-eeb6-4b13-beed-20b9894eeadf",
-                    "rel": "bookmark"
-                },
-                {
-                    "href": "http://glance.openstack.example.com/images/54eadb78-eeb6-4b13-beed-20b9894eeadf",
-                    "rel": "alternate",
-                    "type": "application/vnd.openstack.image"
-                }
-            ],
-            "name": "fakeimage123456"
-        },
-        {
-            "id": "eb7458f3-d003-4187-8027-595591dc2723",
-            "links": [
-                {
-                    "href": "http://openstack.example.com/v2/6f70656e737461636b20342065766572/images/eb7458f3-d003-4187-8027-595591dc2723",
-                    "rel": "self"
-                },
-                {
-                    "href": "http://openstack.example.com/6f70656e737461636b20342065766572/images/eb7458f3-d003-4187-8027-595591dc2723",
-                    "rel": "bookmark"
-                },
-                {
-                    "href": "http://glance.openstack.example.com/images/eb7458f3-d003-4187-8027-595591dc2723",
-                    "rel": "alternate",
-                    "type": "application/vnd.openstack.image"
-                }
-            ],
-            "name": "fakeimage123456"
         }
     ]
 }

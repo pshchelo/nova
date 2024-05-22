@@ -686,7 +686,7 @@ class TestRequestFilter(test.NoDBTestCase):
         self.assertEqual(set(), reqspec.root_required)
         self.assertEqual(set(), reqspec.root_forbidden)
 
-    def test_ephemeral_encryption_filter_encryption_no_format(self):
+    def test_ephemeral_encryption_filter_encryption(self):
         # First ensure that ephemeral_encryption_filter is included
         self.assertIn(request_filter.ephemeral_encryption_filter,
                       request_filter.ALL_REQUEST_FILTERS)
@@ -702,29 +702,6 @@ class TestRequestFilter(test.NoDBTestCase):
             request_filter.ephemeral_encryption_filter(self.context, reqspec))
         self.assertEqual(
             {ot.COMPUTE_EPHEMERAL_ENCRYPTION}, reqspec.root_required)
-        self.assertEqual(set(), reqspec.root_forbidden)
-
-    def test_ephemeral_encryption_filter_encryption_and_format(self):
-        # First ensure that ephemeral_encryption_filter is included
-        self.assertIn(request_filter.ephemeral_encryption_filter,
-                      request_filter.ALL_REQUEST_FILTERS)
-
-        reqspec = objects.RequestSpec(
-            flavor=objects.Flavor(
-                extra_specs={
-                    'hw:ephemeral_encryption': 'True',
-                    'hw:ephemeral_encryption_format': 'luks'
-                }),
-            image=objects.ImageMeta(
-                properties=objects.ImageMetaProps()))
-        self.assertEqual(set(), reqspec.root_required)
-        self.assertEqual(set(), reqspec.root_forbidden)
-        self.assertTrue(
-            request_filter.ephemeral_encryption_filter(self.context, reqspec))
-        self.assertEqual(
-            {ot.COMPUTE_EPHEMERAL_ENCRYPTION,
-             ot.COMPUTE_EPHEMERAL_ENCRYPTION_LUKS},
-            reqspec.root_required)
         self.assertEqual(set(), reqspec.root_forbidden)
 
     def test_virtio_sound_filter(self):

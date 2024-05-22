@@ -6280,7 +6280,6 @@ class _ComputeAPIUnitTestMixIn(object):
         flavor = self._create_flavor(
             extra_specs={
                 'hw:ephemeral_encryption': True,
-                'hw:ephemeral_encryption_format': 'luks',
             }
         )
         block_device_mapping = [

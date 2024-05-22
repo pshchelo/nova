@@ -213,20 +213,6 @@ class GlanceFixture(fixtures.Fixture):
         'hw_ephemeral_encryption': 'False'
     }
 
-    eph_encryption_luks = copy.deepcopy(image1)
-    eph_encryption_luks['id'] = uuidsentinel.eph_encryption_luks
-    eph_encryption_luks['properties'] = {
-        'hw_ephemeral_encryption': 'True',
-        'hw_ephemeral_encryption_format': 'luks'
-    }
-
-    eph_encryption_plain = copy.deepcopy(image1)
-    eph_encryption_plain['id'] = uuidsentinel.eph_encryption_plain
-    eph_encryption_plain['properties'] = {
-        'hw_ephemeral_encryption': 'True',
-        'hw_ephemeral_encryption_format': 'plain'
-    }
-
     def __init__(self, test):
         super().__init__()
         self.test = test
@@ -253,8 +239,6 @@ class GlanceFixture(fixtures.Fixture):
         self.create(None, self.auto_disk_config_enabled_image)
         self.create(None, self.eph_encryption)
         self.create(None, self.eph_encryption_disabled)
-        self.create(None, self.eph_encryption_luks)
-        self.create(None, self.eph_encryption_plain)
 
         self._imagedata = {}
 

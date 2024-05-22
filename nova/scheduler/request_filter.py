@@ -431,16 +431,6 @@ def ephemeral_encryption_filter(
     LOG.debug("ephemeral_encryption_filter added trait "
               "COMPUTE_EPHEMERAL_ENCRYPTION")
 
-    # Try to find the format in the flavor or image and add as a trait
-    eph_format = hardware.get_ephemeral_encryption_format(
-        request_spec.flavor, request_spec.image)
-    if eph_format:
-        # We don't need to validate the trait here because the earlier call to
-        # get_ephemeral_encryption_format will raise if it is not valid
-        trait_name = f"COMPUTE_EPHEMERAL_ENCRYPTION_{eph_format.upper()}"
-        request_spec.root_required.add(trait_name)
-        LOG.debug(f"ephemeral_encryption_filter added trait {trait_name}")
-
     return True
 
 

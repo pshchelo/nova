@@ -1677,20 +1677,12 @@ class API:
                 flavor, image_meta):
             return
 
-        # NOTE(lyarwood): Attempt to find the format in the flavor and image,
-        # if one isn't found then the compute will need to provide and save a
-        # default format during a the initial build.
-        eph_format = hardware.get_ephemeral_encryption_format(
-            flavor, image_meta)
-
         # NOTE(lyarwood): The term ephemeral is overloaded in the codebase,
         # what it actually means in the context of ephemeral encryption is
         # anything local to the compute host so use the is_local property.
         # TODO(lyarwood): Add .get_local_devices() to BlockDeviceMappingList
         for bdm in [b for b in block_device_mapping if b.is_local]:
             bdm.encrypted = True
-            if eph_format:
-                bdm.encryption_format = eph_format
 
     def _create_instance(self, context, flavor,
                image_href, kernel_id, ramdisk_id,

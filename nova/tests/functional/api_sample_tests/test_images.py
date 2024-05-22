@@ -27,8 +27,6 @@ class ImagesSampleJsonTest(api_sample_base.ApiSampleTestBaseV21):
         # IDs are UUIDs.
         subs['eph_encryption_id'] = vanilla_regexes['uuid']
         subs['eph_encryption_disabled_id'] = vanilla_regexes['uuid']
-        subs['eph_encryption_luks_id'] = vanilla_regexes['uuid']
-        subs['eph_encryption_plain_id'] = vanilla_regexes['uuid']
         return subs
 
     def test_images_list(self):
@@ -38,8 +36,6 @@ class ImagesSampleJsonTest(api_sample_base.ApiSampleTestBaseV21):
             'eph_encryption_id': self.glance.eph_encryption['id'],
             'eph_encryption_disabled_id':
                 self.glance.eph_encryption_disabled['id'],
-            'eph_encryption_luks_id': self.glance.eph_encryption_luks['id'],
-            'eph_encryption_plain_id': self.glance.eph_encryption_plain['id'],
         }
         self._verify_response('images-list-get-resp', subs, response, 200)
 
@@ -57,8 +53,6 @@ class ImagesSampleJsonTest(api_sample_base.ApiSampleTestBaseV21):
             'eph_encryption_id': self.glance.eph_encryption['id'],
             'eph_encryption_disabled_id':
                 self.glance.eph_encryption_disabled['id'],
-            'eph_encryption_luks_id': self.glance.eph_encryption_luks['id'],
-            'eph_encryption_plain_id': self.glance.eph_encryption_plain['id'],
         }
         self._verify_response('images-details-get-resp', subs, response, 200)
 

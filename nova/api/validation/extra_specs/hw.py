@@ -625,18 +625,6 @@ ephemeral_encryption_validators = [
             'description': 'Whether to enable ephemeral storage encryption.',
         },
     ),
-    base.ExtraSpecValidator(
-        name='hw:ephemeral_encryption_format',
-        description=(
-            'The encryption format to be used if ephemeral storage '
-            'encryption is enabled via hw:ephemeral_encryption.'
-        ),
-        value={
-            'type': str,
-            'description': 'The encryption format to be used if enabled.',
-            'enum': fields.BlockDeviceEncryptionFormatType.ALL,
-        },
-    ),
 ]
 
 

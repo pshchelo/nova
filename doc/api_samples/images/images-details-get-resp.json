@@ -275,66 +275,6 @@
             "progress": 100,
             "status": "ACTIVE",
             "updated": "2011-01-01T01:02:03Z"
-        },
-        {
-            "OS-EXT-IMG-SIZE:size": 25165824,
-            "created": "2011-01-01T01:02:03Z",
-            "id": "5f7d4f5b-3781-4a4e-9046-a2a800e807e5",
-            "links": [
-                {
-                    "href": "http://openstack.example.com/v2/6f70656e737461636b20342065766572/images/5f7d4f5b-3781-4a4e-9046-a2a800e807e5",
-                    "rel": "self"
-                },
-                {
-                    "href": "http://openstack.example.com/6f70656e737461636b20342065766572/images/5f7d4f5b-3781-4a4e-9046-a2a800e807e5",
-                    "rel": "bookmark"
-                },
-                {
-                    "href": "http://glance.openstack.example.com/images/5f7d4f5b-3781-4a4e-9046-a2a800e807e5",
-                    "rel": "alternate",
-                    "type": "application/vnd.openstack.image"
-                }
-            ],
-            "metadata": {
-                "hw_ephemeral_encryption": "True",
-                "hw_ephemeral_encryption_format": "luks"
-            },
-            "minDisk": 0,
-            "minRam": 0,
-            "name": "fakeimage123456",
-            "progress": 100,
-            "status": "ACTIVE",
-            "updated": "2011-01-01T01:02:03Z"
-        },
-        {
-            "OS-EXT-IMG-SIZE:size": 25165824,
-            "created": "2011-01-01T01:02:03Z",
-            "id": "261b52ed-f693-4147-8f3b-d25df5efd968",
-            "links": [
-                {
-                    "href": "http://openstack.example.com/v2/6f70656e737461636b20342065766572/images/261b52ed-f693-4147-8f3b-d25df5efd968",
-                    "rel": "self"
-                },
-                {
-                    "href": "http://openstack.example.com/6f70656e737461636b20342065766572/images/261b52ed-f693-4147-8f3b-d25df5efd968",
-                    "rel": "bookmark"
-                },
-                {
-                    "href": "http://glance.openstack.example.com/images/261b52ed-f693-4147-8f3b-d25df5efd968",
-                    "rel": "alternate",
-                    "type": "application/vnd.openstack.image"
-                }
-            ],
-            "metadata": {
-                "hw_ephemeral_encryption": "True",
-                "hw_ephemeral_encryption_format": "plain"
-            },
-            "minDisk": 0,
-            "minRam": 0,
-            "name": "fakeimage123456",
-            "progress": 100,
-            "status": "ACTIVE",
-            "updated": "2011-01-01T01:02:03Z"
         }
     ]
 }
