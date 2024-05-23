@@ -1097,6 +1097,7 @@ object_data = {
     'DiskMetadata': '1.0-e7a0f1ccccf10d26a76b28e7492f3788',
     'EC2Ids': '1.0-474ee1094c7ec16f8ce657595d8c49d9',
     'EC2InstanceMapping': '1.0-a4556eb5c5e94c045fe84f49cf71644f',
+    'EncryptDetails': '1.0-6be248ba8db1c09be2da33cc93936ce4',
     'Flavor': '1.2-4ce99b41327bb230262e5a8f45ff0ce3',
     'FlavorList': '1.1-52b5928600e7ca973aa4fc1e46f3934c',
     'HostMapping': '1.0-1a3390a696792a552ab7bd31a77ba9ac',

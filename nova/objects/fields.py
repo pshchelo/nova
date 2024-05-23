@@ -1231,6 +1231,53 @@ class XenAddress(AddressBase):
     PATTERN = '(00[0-9]{2}00)|[1-9][0-9]+'
 
 
+class CipherAlgorithm(BaseNovaEnum):
+    AES_128 = 'aes-128'
+    AES_192 = 'aes-192'
+    AES_256 = 'aes-256'
+    DES = 'des'
+    DES3 = '3des'
+    CAST5_128 = 'cast5-128'
+    SERPENT_128 = 'serpent-128'
+    SERPENT_192 = 'serpent-192'
+    SERPENT_256 = 'serpent-256'
+    TWOFISH_128 = 'twofish-128'
+    TWOFISH_192 = 'twofish-192'
+    TWOFISH_256 = 'twofish-256'
+
+    ALL = (AES_128, AES_192, AES_256, DES, DES3, CAST5_128, SERPENT_128,
+           SERPENT_192, SERPENT_256, TWOFISH_128, TWOFISH_192, TWOFISH_256)
+
+
+class CipherMode(BaseNovaEnum):
+    ECB = 'ecb'
+    CBC = 'cbc'
+    XTS = 'xts'
+    CTR = 'ctr'
+
+    ALL = (ECB, CBC, XTS, CTR)
+
+
+class HashAlgorithm(BaseNovaEnum):
+    MD5 = 'md5'
+    SHA1 = 'sha1'
+    SHA224 = 'sha224'
+    SHA256 = 'sha256'
+    SHA384 = 'sha384'
+    SHA512 = 'sha512'
+    RIPEMD160 = 'ripemd160'
+
+    ALL = (MD5, SHA1, SHA224, SHA256, SHA384, SHA512, RIPEMD160)
+
+
+class IVGenAlgorithm(BaseNovaEnum):
+    PLAIN = 'plain'
+    PLAIN64 = 'plain64'
+    ESSIV = 'essiv'
+
+    ALL = (PLAIN, PLAIN64, ESSIV)
+
+
 class USBAddressField(AutoTypedField):
     AUTO_TYPE = USBAddress()
 
@@ -1465,3 +1512,19 @@ class ListOfListsOfStringsField(AutoTypedField):
 
 class DictOfSetOfIntegersField(AutoTypedField):
     AUTO_TYPE = Dict(Set(fields.Integer()))
+
+
+class CipherAlgorithmField(AutoTypedField):
+    AUTO_TYPE = CipherAlgorithm()
+
+
+class CipherModeField(AutoTypedField):
+    AUTO_TYPE = CipherMode()
+
+
+class HashAlgorithmField(AutoTypedField):
+    AUTO_TYPE = HashAlgorithm()
+
+
+class IVGenAlgorithmField(AutoTypedField):
+    AUTO_TYPE = IVGenAlgorithm()
