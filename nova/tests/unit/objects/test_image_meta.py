@@ -675,3 +675,30 @@ class TestImageMetaProps(test.NoDBTestCase):
         self.assertNotIn(
             'hw_mem_encryption_model',
             primitive['nova_object.data'])
+
+    def test_obj_make_compatible_os_encrypt_properties(self):
+        obj = objects.ImageMetaProps(
+            os_encrypt_format='luks', os_encrypt_cipher='aes-256',
+            os_encrypt_key_id=uuids.secret,
+            os_encrypt_key_deletion_policy=True,
+            os_decrypt_container_format='qcow2', os_decrypt_size=5)
+
+        primitive = obj.obj_to_primitive('1.43')
+        self.assertIn('os_encrypt_format', primitive['nova_object.data'])
+        self.assertIn('os_encrypt_cipher', primitive['nova_object.data'])
+        self.assertIn('os_encrypt_key_id', primitive['nova_object.data'])
+        self.assertIn(
+            'os_encrypt_key_deletion_policy', primitive['nova_object.data'])
+        self.assertIn(
+            'os_decrypt_container_format', primitive['nova_object.data'])
+        self.assertIn('os_decrypt_size', primitive['nova_object.data'])
+
+        primitive = obj.obj_to_primitive('1.42')
+        self.assertNotIn('os_encrypt_format', primitive['nova_object.data'])
+        self.assertNotIn('os_encrypt_cipher', primitive['nova_object.data'])
+        self.assertNotIn('os_encrypt_key_id', primitive['nova_object.data'])
+        self.assertNotIn(
+            'os_encrypt_key_deletion_policy', primitive['nova_object.data'])
+        self.assertNotIn(
+            'os_decrypt_container_format', primitive['nova_object.data'])
+        self.assertNotIn('os_decrypt_size', primitive['nova_object.data'])

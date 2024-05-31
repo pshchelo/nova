@@ -136,7 +136,12 @@ class ImageMetaPropsPayload(base.NotificationPayloadBase):
     # Version 1.16: Added 'hw_sound_model' field
     # Version 1.17: Added 'hw_usb_model' and 'hw_redirected_usb_ports' fields
     # Version 1.18: Added 'hw_mem_encryption_model' field
-    VERSION = '1.18'
+    # Version 1.19: Added 'os_encrypt_format', 'os_encrypt_cipher',
+    #                     'os_encrypt_key_id',
+    #                     'os_encrypt_key_deletion_policy',
+    #                     'os_decrypt_container_format', and 'os_decrypt_size'
+    #                     fields
+    VERSION = '1.19'
 
     # NOTE(efried): This logic currently relies on all of the fields of
     # ImageMetaProps being initialized with no arguments. See the docstring.
@@ -146,7 +151,7 @@ class ImageMetaPropsPayload(base.NotificationPayloadBase):
     #  class being used in more than one place.
     fields = {
         k: v.__class__() for k, v in image_meta.ImageMetaProps.fields.items()
-            if k not in ('hw_ephemeral_encryption_secret_uuid',)}
+            if k not in ('os_encrypt_key_id',)}
 
     SCHEMA = {
         k: ('image_meta_props', k) for k in fields}

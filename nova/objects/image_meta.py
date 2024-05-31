@@ -206,15 +206,27 @@ class ImageMetaProps(base.NovaObject):
     # Version 1.40: Added 'hw_sound_model' field
     # Version 1.41: Added 'hw_usb_model' and 'hw_redirected_usb_ports' fields
     # Version 1.42: Added 'hw_mem_encryption_model' field
+    # Version 1.43: Added 'os_encrypt_format', 'os_encrypt_cipher',
+    #                     'os_encrypt_key_id',
+    #                     'os_encrypt_key_deletion_policy',
+    #                     'os_decrypt_container_format', and 'os_decrypt_size'
+    #                     fields
 
     # NOTE(efried): When bumping this version, the version of
     # ImageMetaPropsPayload must also be bumped. See its docstring for details.
-    VERSION = '1.42'
+    VERSION = '1.43'
 
     def obj_make_compatible(self, primitive, target_version):  # noqa: C901
         super(ImageMetaProps, self).obj_make_compatible(primitive,
                                                         target_version)
         target_version = versionutils.convert_version_to_tuple(target_version)
+        if target_version < (1, 43):
+            primitive.pop('os_encrypt_format', None)
+            primitive.pop('os_encrypt_cipher', None)
+            primitive.pop('os_encrypt_key_id', None)
+            primitive.pop('os_encrypt_key_deletion_policy', None)
+            primitive.pop('os_decrypt_container_format', None)
+            primitive.pop('os_decrypt_size', None)
         if target_version < (1, 42):
             primitive.pop('hw_mem_encryption_model', None)
         if target_version < (1, 41):
@@ -634,6 +646,21 @@ class ImageMetaProps(base.NovaObject):
         # is a fairly generic type. For a detailed type consider os_distro
         # instead
         'os_type': fields.OSTypeField(),
+
+        # Glance standardized encryption image properties.
+        # The encryption format of the encrypted image, like 'luks'
+        'os_encrypt_format': fields.BlockDeviceEncryptionFormatTypeField(),
+        # The encryption cipher algorithm for the encrypted image, like aes-256
+        'os_encrypt_cipher': fields.CipherAlgorithmField(),
+        # The key manager secret UUID of the secret used to encrypt the image
+        'os_encrypt_key_id': fields.UUIDField(),
+        # Whether or not Glance should delete the key manager secret at the
+        # time of image deletion
+        'os_encrypt_key_deletion_policy': fields.BooleanField(),
+        # The image format after decryption, like qcow2
+        'os_decrypt_container_format': fields.DiskFormatField(),
+        # The size of the image after decryption
+        'os_decrypt_size': fields.IntegerField(),
 
         # The required traits associated with the image. Traits are expected to
         # be defined as starting with `trait:` like below:
