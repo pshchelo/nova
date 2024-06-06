@@ -218,6 +218,7 @@ class DriverBlockDevice(dict):
 
 
 class DriverSwapBlockDevice(DriverBlockDevice):
+    _proxy_as_attr_inherited = set(['encryption_details'])
     _fields = set([
         'device_name',
         'swap_size',
@@ -225,7 +226,7 @@ class DriverSwapBlockDevice(DriverBlockDevice):
         'encrypted',
         'encryption_secret_uuid',
         'encryption_format',
-        'encryption_options',
+        'encryption_details',
     ])
     _readonly_fields = set(['encrypted'])
     _update_on_save = {
@@ -236,7 +237,7 @@ class DriverSwapBlockDevice(DriverBlockDevice):
         # 'encrypted' attribute value.
         'encryption_secret_uuid': None,
         'encryption_format': None,
-        'encryption_options': None,
+        'encryption_details': None,
     }
 
     def _transform(self):
@@ -249,13 +250,13 @@ class DriverSwapBlockDevice(DriverBlockDevice):
             'encrypted': self._bdm_obj.encrypted,
             'encryption_secret_uuid': self._bdm_obj.encryption_secret_uuid,
             'encryption_format': self._bdm_obj.encryption_format,
-            'encryption_options': self._bdm_obj.encryption_options
+            'encryption_details': self._bdm_obj.encryption_details
         })
 
 
 class DriverImageBlockDevice(DriverBlockDevice):
     _valid_source = 'image'
-    _proxy_as_attr_inherited = set(['image_id'])
+    _proxy_as_attr_inherited = set(['image_id', 'encryption_details'])
     _new_only_fields = set([
         'disk_bus',
         'device_type',
@@ -264,7 +265,7 @@ class DriverImageBlockDevice(DriverBlockDevice):
         'encrypted',
         'encryption_secret_uuid',
         'encryption_format',
-        'encryption_options'
+        'encryption_details'
     ])
     _fields = set([
         'device_name',
@@ -281,7 +282,7 @@ class DriverImageBlockDevice(DriverBlockDevice):
         # 'encrypted' attribute value.
         'encryption_secret_uuid': None,
         'encryption_format': None,
-        'encryption_options': None,
+        'encryption_details': None,
     }
 
     def _transform(self):
@@ -299,11 +300,12 @@ class DriverImageBlockDevice(DriverBlockDevice):
             'encrypted': self._bdm_obj.encrypted,
             'encryption_secret_uuid': self._bdm_obj.encryption_secret_uuid,
             'encryption_format': self._bdm_obj.encryption_format,
-            'encryption_options': self._bdm_obj.encryption_options
+            'encryption_details': self._bdm_obj.encryption_details
         })
 
 
 class DriverEphemeralBlockDevice(DriverBlockDevice):
+    _proxy_as_attr_inherited = set(['encryption_details'])
     _new_only_fields = set([
         'disk_bus',
         'device_type',
@@ -311,7 +313,7 @@ class DriverEphemeralBlockDevice(DriverBlockDevice):
         'encrypted',
         'encryption_secret_uuid',
         'encryption_format',
-        'encryption_options'])
+        'encryption_details'])
     _fields = set(['device_name', 'size']) | _new_only_fields
     _readonly_fields = set(['encrypted'])
     _update_on_save = {
@@ -323,7 +325,7 @@ class DriverEphemeralBlockDevice(DriverBlockDevice):
         # 'encrypted' attribute value.
         'encryption_secret_uuid': None,
         'encryption_format': None,
-        'encryption_options': None,
+        'encryption_details': None,
     }
 
     def _transform(self):
@@ -338,7 +340,7 @@ class DriverEphemeralBlockDevice(DriverBlockDevice):
             'encrypted': self._bdm_obj.encrypted,
             'encryption_secret_uuid': self._bdm_obj.encryption_secret_uuid,
             'encryption_format': self._bdm_obj.encryption_format,
-            'encryption_options': self._bdm_obj.encryption_options
+            'encryption_details': self._bdm_obj.encryption_details
         })
 
 

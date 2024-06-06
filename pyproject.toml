@@ -144,6 +144,7 @@ files = [
     "nova/network/neutron.py",
     "nova/pci/*.py",
     "nova/privsep/path.py",
+    "nova/privsep/qemu.py",
     "nova/scheduler/client/report.py",
     "nova/scheduler/request_filter.py",
     "nova/scheduler/utils.py",

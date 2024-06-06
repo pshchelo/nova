@@ -3527,7 +3527,7 @@ class _ComputeAPIUnitTestMixIn(object):
              'destination_type': 'volume', 'delete_on_termination': False,
              'tag': None, 'volume_type': None,
              'encrypted': None, 'encryption_format': None,
-             'encryption_secret_uuid': None, 'encryption_options': None})
+             'encryption_secret_uuid': None, 'encryption_details': None})
 
         limits_patcher = mock.patch.object(
             self.compute_api.volume_api, 'get_absolute_limits',
@@ -3592,7 +3592,7 @@ class _ComputeAPIUnitTestMixIn(object):
              'destination_type': 'local', 'delete_on_termination': True,
              'tag': None, 'volume_type': None,
              'encrypted': False, 'encryption_format': None,
-             'encryption_secret_uuid': None, 'encryption_options': None})
+             'encryption_secret_uuid': None, 'encryption_details': None})
 
         quiesced = [False, False]
 

@@ -391,6 +391,25 @@ class NovaMigrationsWalk(
             'migrations_by_dest_host_nodes_and_status_idx'
         )
 
+    def _check_7a919e29a911(self, connection):
+        for prefix in ('', 'shadow_'):
+            table_name = prefix + 'block_device_mapping'
+
+            self.assertColumnExists(
+                connection, table_name, 'encryption_details')
+            self.assertColumnNotExists(
+                connection, table_name, 'encryption_options')
+
+            # Only check for the expected types if we're using sqlite because
+            # other databases' types may be different. For example, Boolean
+            # may be represented as an integer in MySQL
+            if connection.engine.name != 'sqlite':
+                return
+
+            table = oslodbutils.get_table(connection, table_name)
+            self.assertIsInstance(
+                table.c.encryption_details.type, sa.types.Text)
+
     def test_single_base_revision(self):
         """Ensure we only have a single base revision.
 

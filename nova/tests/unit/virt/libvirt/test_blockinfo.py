@@ -1153,6 +1153,7 @@ class LibvirtBlockInfoTest(test.NoDBTestCase):
 
     def test_get_info_from_bdm(self):
         instance = objects.Instance(**self.test_instance)
+        encryption_details = objects.EncryptDetails()
         bdms = [{'device_name': '/dev/vds', 'device_type': 'disk',
                  'disk_bus': 'usb', 'swap_size': 4},
                 {'device_type': 'disk', 'guest_format': 'ext4',
@@ -1175,7 +1176,7 @@ class LibvirtBlockInfoTest(test.NoDBTestCase):
                  'device_name': '/dev/sda', 'size': 3},
                 {'encrypted': True, 'encryption_secret_uuid': uuids.secret,
                  'encryption_format': 'luks',
-                 'encryption_options': '{"json": "options"}'}]
+                 'encryption_details': encryption_details}]
         expected = [{'dev': 'vds', 'type': 'disk', 'bus': 'usb'},
                     {'dev': 'vdb', 'type': 'disk',
                      'bus': 'virtio', 'format': 'ext4'},
@@ -1188,7 +1189,7 @@ class LibvirtBlockInfoTest(test.NoDBTestCase):
                     {'dev': 'vda', 'type': 'disk', 'bus': 'virtio',
                      'encrypted': True, 'encryption_secret_uuid': uuids.secret,
                      'encryption_format': 'luks',
-                     'encryption_options': {'json': 'options'}}]
+                     'encryption_details': encryption_details}]
 
         image_meta = objects.ImageMeta.from_dict(self.test_image_meta)
         for bdm, expected in zip(bdms, expected):

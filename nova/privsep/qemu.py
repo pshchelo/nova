@@ -27,6 +27,7 @@ from oslo_utils import units
 
 from nova import exception
 from nova.i18n import _
+from nova.objects import encrypt_details
 import nova.privsep.utils
 
 LOG = logging.getLogger(__name__)
@@ -36,9 +37,10 @@ QEMU_IMG_LIMITS = processutils.ProcessLimits(
     address_space=1 * units.Gi)
 
 
-class EncryptionOptions(ty.TypedDict):
+class EncryptionInfo(ty.TypedDict):
     secret: str
     format: str
+    details: 'encrypt_details.EncryptDetails'
 
 
 @nova.privsep.sys_admin_pctxt.entrypoint
@@ -58,8 +60,8 @@ def unprivileged_convert_image(
     out_format: str,
     instances_path: str,
     compress: bool,
-    src_encryption: EncryptionOptions | None = None,
-    dest_encryption: EncryptionOptions | None = None,
+    src_encryption: EncryptionInfo | None = None,
+    dest_encryption: EncryptionInfo | None = None,
 ) -> None:
     """Disk image conversion with qemu-img
 
@@ -180,31 +182,16 @@ def unprivileged_convert_image(
                 encryption_opts += [
                     '-o', f"{prefix}format={dest_encryption['format']}"
                 ]
-            # Supported luks options:
-            #  cipher-alg=<str>       - Name of cipher algorithm and
-            #                           key length
-            #  cipher-mode=<str>      - Name of encryption cipher mode
-            #  hash-alg=<str>         - Name of hash algorithm to use
-            #                           for PBKDF
-            #  iter-time=<num>        - Time to spend in PBKDF in
-            #                           milliseconds
-            #  ivgen-alg=<str>        - Name of IV generator algorithm
-            #  ivgen-hash-alg=<str>   - Name of IV generator hash
-            #                           algorithm
-            #
-            # NOTE(melwitt): Sensible defaults (that match the qemu
-            # defaults) are hardcoded at this time for simplicity and
-            # consistency when instances are migrated. Configuration of
-            # luks options could be added in a future release.
-            encryption_options = {
-                'cipher-alg': 'aes-256',
-                'cipher-mode': 'xts',
-                'hash-alg': 'sha256',
-                'iter-time': 2000,
-                'ivgen-alg': 'plain64',
-                'ivgen-hash-alg': 'sha256',
+            details = dest_encryption['details']
+            encryption_details = {
+                'cipher-alg': details.cipher_algorithm,
+                'cipher-mode': details.cipher_mode,
+                'hash-alg': details.hash_algorithm,
+                'iter-time': details.iter_time,
+                'ivgen-alg': details.ivgen_algorithm,
+                'ivgen-hash-alg': details.ivgen_hash_algorithm,
             }
-            for option, value in encryption_options.items():
+            for option, value in encryption_details.items():
                 encryption_opts += [
                     '-o', f'{prefix}{option}={value}',
                 ]

@@ -32869,19 +32869,19 @@ class EphemeralEncryptionTestCase(test.NoDBTestCase):
             device_type='disk', disk_bus='virtio', no_device=False,
             device_name='/dev/vda', volume_size=1, source_type='image',
             destination_type='local', guest_format=None, encrypted=True,
-            encryption_format=None, encryption_options=None,
+            encryption_format=None, encryption_details=None,
             encryption_secret_uuid=None)
         self.eph_bdm = block_device_obj.BlockDeviceMapping(
             id=2, uuid=uuids.ephemeral, device_type='disk', disk_bus='virtio',
             no_device=False, device_name='/dev/vdb', volume_size=1,
             source_type='blank', destination_type='local', guest_format=None,
-            encrypted=True, encryption_format=None, encryption_options=None,
+            encrypted=True, encryption_format=None, encryption_details=None,
             encryption_secret_uuid=None)
         self.swap_bdm = block_device_obj.BlockDeviceMapping(
             id=3, uuid=uuids.swap, device_type='disk', disk_bus='virtio',
             no_device=False, device_name='/dev/vdc', volume_size=1,
             source_type='blank', destination_type='local', guest_format='swap',
-            encrypted=True, encryption_format=None, encryption_options=None,
+            encrypted=True, encryption_format=None, encryption_details=None,
             encryption_secret_uuid=None)
 
         # Mock things we need to assert.
@@ -33237,7 +33237,7 @@ class EphemeralEncryptionTestCase(test.NoDBTestCase):
             no_device=False, device_name='/dev/vdb', volume_size=1,
             source_type='blank', destination_type='local', guest_format=None,
             encrypted=True, encryption_format='plain',
-            encryption_options=None,
+            encryption_details=None,
             encryption_secret_uuid=encryption_secret_uuid,
         )
         ephemerals = [driver_block_device.DriverEphemeralBlockDevice(bdm)]
@@ -33313,7 +33313,7 @@ class EphemeralEncryptionTestCase(test.NoDBTestCase):
             'destination_type': 'local',
             'encrypted': True,
             'encryption_format': 'luks',
-            'encryption_options': None,
+            'encryption_details': None,
             'encryption_secret_uuid': None,
         }
         bdm = fake_block_device.fake_bdm_object(self.context, bdm_dict)
@@ -33349,7 +33349,7 @@ class EphemeralEncryptionTestCase(test.NoDBTestCase):
             'destination_type': 'local',
             'encrypted': True,
             'encryption_format': 'luks',
-            'encryption_options': None,
+            'encryption_details': None,
             'encryption_secret_uuid': None,
         }
         bdm = fake_block_device.fake_bdm_object(self.context, bdm_dict)

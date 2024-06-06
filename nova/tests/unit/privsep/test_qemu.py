@@ -17,6 +17,7 @@ from unittest import mock
 
 import ddt
 
+from nova.objects import encrypt_details
 import nova.privsep.qemu
 from nova import test
 from nova.tests import fixtures
@@ -102,7 +103,11 @@ class QemuTestCase(test.NoDBTestCase):
         mock_file = mock.Mock()
         mock_file.name = '/tmp/filename'
         mock_tempfile.return_value.__enter__.return_value = mock_file
-        encryption = {'format': 'luks', 'secret': '12345'}
+        encryption = {
+            'format': 'luks',
+            'secret': '12345',
+            'details': encrypt_details.EncryptDetails(),
+        }
 
         nova.privsep.qemu.convert_image(
             '/fake/source', '/fake/dest', in_format, out_format,
@@ -151,8 +156,11 @@ class QemuTestCase(test.NoDBTestCase):
         mock_file2.name = '/tmp/filename2'
         mock_tempfile.return_value.__enter__.side_effect = [
             mock_file1, mock_file2]
-        dest_encryption = {'format': 'luks', 'secret': '67890'}
-
+        dest_encryption = {
+            'format': 'luks',
+            'secret': '67890',
+            'details': encrypt_details.EncryptDetails(),
+        }
         nova.privsep.qemu.convert_image(
             '/fake/source', '/fake/dest', in_format, out_format,
             '/fake/instances/path', compress=True,
