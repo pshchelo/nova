@@ -455,9 +455,6 @@ class EncryptionSecretTest(test.NoDBTestCase):
         driver_bdm = {'uuid': uuids.driver_bdm}
         passphrase = mock.Mock()
         mock_pass.return_value = passphrase
-        if for_detail is None:
-            for_detail = f'instance {instance.uuid} BDM {driver_bdm["uuid"]}'
-        secret_name = f'Ephemeral encryption secret for {for_detail}'
 
         secret_uuid, secret = crypto.create_ephemeral_encryption_secret(
             self.ctxt, instance, driver_bdm, for_detail=for_detail)
@@ -465,8 +462,13 @@ class EncryptionSecretTest(test.NoDBTestCase):
         self.assertEqual(
             mock_get_manager.return_value.store.return_value, secret_uuid)
         self.assertEqual(secret, mock_text.return_value)
+
+        if for_detail is None:
+            for_detail = f'instance {instance.uuid} BDM {driver_bdm["uuid"]}'
+        expected_secret_name = f'Ephemeral encryption secret for {for_detail}'
         mock_pass.assert_called_once_with(
-            mock_text.return_value, name=secret_name)
+            mock_text.return_value, name=expected_secret_name)
+
         mock_get_manager.return_value.store.assert_called_once_with(
             self.ctxt, passphrase)
 
